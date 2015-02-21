@@ -74,17 +74,13 @@ class Compiler(object):
         keys.sort()
         result = []
         for key in keys:
-            self.printDatetime(key)
             theseRecords = records[key]
             for thisRecord in theseRecords:
-                self.printRecord(thisRecord)
                 result.append(thisRecord)
         return result
 
 
 class ProcessQueue(object):
-    """
-    """
     def __init__(self, N):
         from multiprocessing import Pool
         self.pool = Pool(processes=N)
@@ -99,7 +95,7 @@ class BogusQueue(object):
     def call(self, func, *args, **kw):
         result = func(*args, **kw)
         return defer.succeed(result)
-        
+
 
 class Reader(object):
     """
@@ -153,10 +149,9 @@ class Reader(object):
             raise OSError("Directory '{}' not found".format(logDir))
         self.dirPath = logDir
         self.exclude, self.noUA = exclude, noUA
-        #self.q = ThreadQueue(self.cores)
+        self.compiler = Compiler(self.verbose)
         #self.q = ProcessQueue(self.cores)
         self.q = BogusQueue()
-        self.compiler = Compiler(self.verbose)
 
     def msg(self, line):
         if self.verbose:
@@ -189,7 +184,6 @@ class Reader(object):
         return fh
 
     def dtFactory(self, *args):
-        print args
         intArgs = [int(x) for x in args]
         return datetime(*intArgs)
 
@@ -245,48 +239,38 @@ class Reader(object):
         keyword, then the code will be omitted and lines with those
         codes will be ignored.
 
-        Returns a deferred that fires when the records have all been
-        added to my compiler.
-
         """
-        def parsed(stuff):
-            print stuff
-            if stuff is None:
-                # Bogus line
+        stuff = self.parseLine(line)
+        if stuff is None:
+            # Bogus line
+            return
+        thisVhost, ip, dt, url, code, ref, ua = stuff
+        if vhost is None:
+            record = [thisVhost, dt, ip, url]
+        elif thisVhost != vhost:
+            record = [dt, ip, url]
+        else:
+            # Excluded vhost
+            return
+        if self.noUA is False:
+            record.append(ua)
+        if self.exclude:
+            if code in self.exclude:
+                # Excluded code
                 return
-            thisVhost, ip, dt, url, code, ref, ua = stuff
-            if vhost is None:
-                record = [thisVhost, dt, ip, url]
-            elif thisVhost != vhost:
-                record = [dt, ip, url]
-            else:
-                # Excluded vhost
-                return
-            if self.noUA is False:
-                record.append(ua)
-            if self.exclude:
-                if code in self.exclude:
-                    # Excluded code
-                    return
-            else:
-                record.append(code)
-            self.compiler.addRecord(record)
-
-        return self.q.call(
-            self.parseLine, line).addCallbacks(parsed, self.oops)
+        else:
+            record.append(code)
+        self.compiler.addRecord(record)
 
     def run(self, vhost=None):
         """
         """
-        def readAnotherLine(null, fh):
-            line = fh.readline()
-            if line:
-                d = self.makeRecord(line, vhost)
-                d.addCallback(readAnotherLine, fh)
-                d.addErrback(self.oops)
-            else:
-                d = defer.succeed(None)
-            return d
+        def makeRecords(fileName):
+            print fileName
+            fh = self.file(fileName)
+            for line in fh:
+                self.makeRecord(line, vhost)
+            fh.close()
 
         def allDone(null):
             return self.compiler.getRecords()
@@ -296,8 +280,7 @@ class Reader(object):
         for fileName in os.listdir(self.dirPath):
             if 'access.log' not in fileName:
                 continue
-            fh = self.file(fileName)
-            dList.append(readAnotherLine(None, fh))
+            dList.append(self.q.call(makeRecords, fileName))
         return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
 
         
