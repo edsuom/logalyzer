@@ -10,6 +10,10 @@ Copyright (C) 2014-2015 Tellectual LLC
 import re, os, os.path, gzip
 from datetime import datetime
 
+from twisted.internet import defer, reactor
+
+#from asynqueue import ThreadQueue
+
 
 def rdb(sep, *args):
     """
@@ -28,10 +32,80 @@ def rc(*parts):
     return re.compile(rexp)
 
 
+
+class Compiler(object):
+    """
+    I compile logfile records into a single big mass, chronologically
+    sorted.
+    """
+    def __init__(self, verbose=False):
+        self.dtLast = None
+        self.records = {}
+        self.verbose = verbose
+
+    def addRecord(self, record):
+        dt = record[0]
+        rest = record[1:]
+        if dt in self.records:
+            thoseRecords = self.records[dt]
+            if rest not in thoseRecords:
+                thoseRecords.append(rest)
+            # Otherwise, its a duplicate record
+        else:
+            # First record with this timestamp
+            self.records[dt] = [rest]
+
+    def printDatetime(self, dt):
+        pass
+        #if self.verbose:
+        #    print "\n{}".format(dt.isoformat(' '))
+
+    def printRecord(self, record):
+        pass
+        #if self.verbose:
+        #    print "{:15s}  {}".format(record[0], record[1][:50])
+
+    def getRecords(self):
+        """
+        Returns my records in chronological order.
+        """
+        records = self.records
+        keys = records.keys()
+        keys.sort()
+        result = []
+        for key in keys:
+            self.printDatetime(key)
+            theseRecords = records[key]
+            for thisRecord in theseRecords:
+                self.printRecord(thisRecord)
+                result.append(thisRecord)
+        return result
+
+
+class ProcessQueue(object):
+    """
+    """
+    def __init__(self, N):
+        from multiprocessing import Pool
+        self.pool = Pool(processes=N)
+
+    def call(self, func, *args, **kw):
+        d = defer.Deferred()
+        self.pool.apply_async(func, args, kw, d.callback)
+        return d
+
+
+class BogusQueue(object):
+    def call(self, func, *args, **kw):
+        result = func(*args, **kw)
+        return defer.succeed(result)
+        
+
 class Reader(object):
     """
     I read and parse web server log files
     """
+    cores = 3
     verbose = True
 
     reTwistdPrefix = rc(
@@ -74,23 +148,23 @@ class Reader(object):
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-    def __init__(self, logDir):
+    def __init__(self, logDir, exclude=[], noUA=False):
         if not os.path.isdir(logDir):
             raise OSError("Directory '{}' not found".format(logDir))
         self.dirPath = logDir
-        self.dtLast = None
+        self.exclude, self.noUA = exclude, noUA
+        #self.q = ThreadQueue(self.cores)
+        #self.q = ProcessQueue(self.cores)
+        self.q = BogusQueue()
+        self.compiler = Compiler(self.verbose)
 
     def msg(self, line):
         if self.verbose:
             print "\n{}".format(line)
 
-    def printRecord(self, dt, record):
-        if not self.verbose:
-            return
-        if dt != self.dtLast:
-            self.dtLast = dt
-            print "\n{}".format(dt.isoformat(' '))
-        print "{:15s}  {}".format(record[0], record[1][:50])
+    def oops(self, failure):
+        failure.raiseException()
+        reactor.stop()
     
     def pathInDir(self, fileName):
         """
@@ -101,21 +175,21 @@ class Reader(object):
                 "Path '{}' specified, use file name only".format(fileName))
         return os.path.abspath(os.path.join(self.dirPath, fileName))
 
-    def readLinesFromFile(self, fileName, isFullPath=False):
+    def file(self, fileName, isFullPath=False):
+        """
+        Opens a file (possibly a compressed one), returning a file
+        object.
+        """
         if not isFullPath:
             fileName = self.pathInDir(fileName)
         if fileName.endswith('.gz'):
             fh = gzip.open(fileName, 'rb')
         else:
             fh = open(fileName, mode="r")
-        # Read the file a line at a time
-        outLines = []
-        for line in fh:
-            outLines.append(line.rstrip('\n\r'))
-        fh.close()
-        return outLines
+        return fh
 
-    def dt(self, *args):
+    def dtFactory(self, *args):
+        print args
         intArgs = [int(x) for x in args]
         return datetime(*intArgs)
 
@@ -129,7 +203,7 @@ class Reader(object):
             raise ValueError("Invalid date/time '{}'".format(text))
         day, monthName, year, hour, minute, second = match.groups()
         month = self.months.index(monthName) + 1
-        return self.dt(year, month, day, hour, minute, second)
+        return self.dtFactory(year, month, day, hour, minute, second)
 
     def parseLine(self, line):
         """
@@ -141,7 +215,7 @@ class Reader(object):
         dt = None
         match = self.reTwistdPrefix.match(line)
         if match:
-            dt = self.dt(*match.groups()[:6])
+            dt = self.dtFactory(*match.groups()[:6])
             if match.group(7) == '-':
                 self.msg(match.group(8))
                 return
@@ -157,11 +231,11 @@ class Reader(object):
         result.extend(match.group(8, 9))
         return result
 
-    def recordator(self, vhost, lines, exclude=[], noUA=False):
+    def makeRecord(self, line, vhost=None):
         """
         Supply a mess of logfile lines and this method will iterate
-        over the parsed results for the specified vhost in
-        chronological order. Each iteration yields a list:
+        over the parsed results for the specified vhost to generate a
+        list for each valid line:
 
         [dt, Requestor IP address, url, UA, code]
 
@@ -171,68 +245,60 @@ class Reader(object):
         keyword, then the code will be omitted and lines with those
         codes will be ignored.
 
+        Returns a deferred that fires when the records have all been
+        added to my compiler.
+
         """
-        for line in lines:
-            stuff = self.parseLine(line)
+        def parsed(stuff):
+            print stuff
             if stuff is None:
-                continue
+                # Bogus line
+                return
             thisVhost, ip, dt, url, code, ref, ua = stuff
-            if thisVhost != vhost:
-                continue
-            thisRecord = [dt, ip, url]
-            if noUA is False:
-                thisRecord.append(ua)
-            if exclude:
-                if code in exclude:
-                    continue
+            if vhost is None:
+                record = [thisVhost, dt, ip, url]
+            elif thisVhost != vhost:
+                record = [dt, ip, url]
             else:
-                thisRecord.append(code)
-            yield thisRecord
+                # Excluded vhost
+                return
+            if self.noUA is False:
+                record.append(ua)
+            if self.exclude:
+                if code in self.exclude:
+                    # Excluded code
+                    return
+            else:
+                record.append(code)
+            self.compiler.addRecord(record)
 
-    def logerator(self, records):
+        return self.q.call(
+            self.parseLine, line).addCallbacks(parsed, self.oops)
+
+    def run(self, vhost=None):
         """
-        Supply a mess of records that each begin with a datetime
-        object and this method will iterate over the UNIQUE remainder
-        of each record in chronological order.
-
-        Only unique entries will be yielded.
-
         """
-        data = {}
-        for stuff in records:
-            dt = stuff[0]
-            thisRecord = stuff[1:]
-            thoseRecords = data.setdefault(dt, [])
-            if thisRecord in thoseRecords:
-                continue
-            self.printRecord(dt, thisRecord)
-            thoseRecords.append(thisRecord)
-        keys = data.keys()
-        keys.sort()
-        for key in keys:
-            theseRecords = data[key]
-            for thisRecord in theseRecords:
-                yield thisRecord
+        def readAnotherLine(null, fh):
+            line = fh.readline()
+            if line:
+                d = self.makeRecord(line, vhost)
+                d.addCallback(readAnotherLine, fh)
+                d.addErrback(self.oops)
+            else:
+                d = defer.succeed(None)
+            return d
 
-    def run(self, vhost, exclude=[], noUA=False):
+        def allDone(null):
+            return self.compiler.getRecords()
+
+        dList = []
         records = []
         for fileName in os.listdir(self.dirPath):
             if 'access.log' not in fileName:
                 continue
-            self.msg("Reading '{}'...".format(fileName))
-            lines = self.readLinesFromFile(fileName)
-            for thisRecord in self.recordator(vhost, lines, exclude, noUA):
-                records.append(thisRecord)
-        return list(self.logerator(records))
+            fh = self.file(fileName)
+            dList.append(readAnotherLine(None, fh))
+        return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
+
         
-
-
-
             
-        
-        
-
-       
-    
-
-

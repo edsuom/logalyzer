@@ -8,6 +8,10 @@ setup(
     name = "Statalysis",
     version = "0.1",
     packages = find_packages(),
+    entry_points = {
+        'console_scripts': [
+            'sa = statalysis.records:run'],
+        }
 )
 
 
