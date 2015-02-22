@@ -10,9 +10,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 import re, os, os.path, gzip
 from datetime import datetime
 
-from twisted.internet import defer, reactor
-
-#from asynqueue import ThreadQueue
+from twisted.internet import defer, reactor, threads
 
 
 def rdb(sep, *args):
@@ -30,7 +28,6 @@ def rc(*parts):
     """
     rexp = r'\s+'.join(parts) + r'\s*$'
     return re.compile(rexp)
-
 
 
 class Compiler(object):
@@ -80,28 +77,10 @@ class Compiler(object):
         return result
 
 
-class ProcessQueue(object):
-    def __init__(self, N):
-        from multiprocessing import Pool
-        self.pool = Pool(processes=N)
-
-    def call(self, func, *args, **kw):
-        d = defer.Deferred()
-        self.pool.apply_async(func, args, kw, d.callback)
-        return d
-
-
-class BogusQueue(object):
-    def call(self, func, *args, **kw):
-        result = func(*args, **kw)
-        return defer.succeed(result)
-
-
 class Reader(object):
     """
     I read and parse web server log files
     """
-    cores = 3
     verbose = True
 
     reTwistdPrefix = rc(
@@ -150,8 +129,6 @@ class Reader(object):
         self.dirPath = logDir
         self.exclude, self.noUA = exclude, noUA
         self.compiler = Compiler(self.verbose)
-        #self.q = ProcessQueue(self.cores)
-        self.q = BogusQueue()
 
     def msg(self, line):
         if self.verbose:
@@ -260,27 +237,39 @@ class Reader(object):
                 return
         else:
             record.append(code)
-        self.compiler.addRecord(record)
+        return record
 
+    def processFile(self, fileName, vhost):
+        """
+        Run this in a thread if you insist
+        """
+        records = []
+        fh = self.file(fileName)
+        for line in fh:
+            record = self.makeRecord(line, vhost)
+            if record:
+                records.append(record)
+        fh.close()
+        
     def run(self, vhost=None):
         """
+        Runs everything in twisted fashion. Why? Because I'm a glutton for
+        punishment.
         """
-        def makeRecords(fileName):
-            print fileName
-            fh = self.file(fileName)
-            for line in fh:
-                self.makeRecord(line, vhost)
-            fh.close()
+        def gotSomeRecords(records):
+            for record in records:
+                self.compiler.addRecord(record)
 
         def allDone(null):
-            return self.compiler.getRecords()
-
+            return self.compile.getRecords()
+        
         dList = []
-        records = []
         for fileName in os.listdir(self.dirPath):
             if 'access.log' not in fileName:
                 continue
-            dList.append(self.q.call(makeRecords, fileName))
+            d = threads.deferToThread(processFile, fileName, vhost)
+            d.addCallbacks(gotSomeRecords, self.oops)
+            dList.append(d)
         return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
 
         

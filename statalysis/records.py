@@ -34,9 +34,7 @@ Copyright (C) 2015 Tellectual LLC
 
 import os.path, csv
 
-from asynqueue import ThreadQueue
 from twisted.internet import reactor
-
 
 import logread
 
@@ -61,7 +59,8 @@ class RecordKeeper(object):
                 csvWriter = csv.writer(cfh)
                 for record in records:
                     csvWriter.writerow(record)
-
+            reactor.stop()
+        
         return self.reader.run(vhost).addCallbacks(gotRecords, self.oops)
 
     def run(self, vhost=None):
