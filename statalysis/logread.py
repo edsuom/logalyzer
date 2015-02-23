@@ -79,13 +79,11 @@ class Compiler(object):
         return result
 
 
-class Reader(object):
+class Parser(object):
     """
-    I read and parse web server log files
     """
-    cores = 2
     verbose = True
-
+    
     reTwistdPrefix = rc(
         rdb("-", 4, 2, 2),              # 1111-22-33
         rdb(":", 2, 2, 2) + r'\+\d+',   # 44-55-66
@@ -126,38 +124,19 @@ class Reader(object):
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-    def __init__(self, logDir, exclude=[], noUA=False):
-        if not os.path.isdir(logDir):
-            raise OSError("Directory '{}' not found".format(logDir))
-        self.dirPath = logDir
-        self.exclude, self.noUA = exclude, noUA
-        self.compiler = Compiler(self.verbose)
-        self.q = ProcessQueue(self.cores)
+    def __init__(self, exclude, noUA):
+        self.exclude = exclude
+        self.noUA = noUA
 
     def msg(self, line):
         if self.verbose:
             print "\n{}".format(line)
-
-    def oops(self, failure):
-        failure.raiseException()
-        reactor.stop()
     
-    def pathInDir(self, fileName):
-        """
-        Returns the absolute path of a file in my project directory
-        """
-        if os.path.split(fileName)[0]:
-            raise ValueError(
-                "Path '{}' specified, use file name only".format(fileName))
-        return os.path.abspath(os.path.join(self.dirPath, fileName))
-
-    def file(self, fileName, isFullPath=False):
+    def file(self, fileName):
         """
         Opens a file (possibly a compressed one), returning a file
         object.
         """
-        if not isFullPath:
-            fileName = self.pathInDir(fileName)
         if fileName.endswith('.gz'):
             fh = gzip.open(fileName, 'rb')
         else:
@@ -243,9 +222,9 @@ class Reader(object):
             record.append(code)
         return record
 
-    def processFile(self, fileName, vhost):
+    def __call__(self, fileName, vhost):
         """
-        Run this in a thread if you insist
+        The public interface to all the parsing.
         """
         records = []
         fh = self.file(fileName)
@@ -255,6 +234,36 @@ class Reader(object):
                 records.append(record)
         fh.close()
         return records
+
+    
+class Reader(object):
+    """
+    I read and parse web server log files
+    """
+    cores = 2
+    verbose = True
+
+    def __init__(self, logDir, exclude=[], noUA=False):
+        if not os.path.isdir(logDir):
+            raise OSError("Directory '{}' not found".format(logDir))
+        self.dirPath = logDir
+        self.compiler = Compiler(self.verbose)
+        self.parser = Parser(exclude, noUA)
+        self.q = ProcessQueue(self.cores)
+        #parser=Parser(exclude, noUA)
+        
+    def oops(self, failure):
+        failure.raiseException()
+        reactor.stop()
+
+    def pathInDir(self, fileName):
+        """
+        Returns the absolute path of a file in my project directory
+        """
+        if os.path.split(fileName)[0]:
+            raise ValueError(
+                "Path '{}' specified, use file name only".format(fileName))
+        return os.path.abspath(os.path.join(self.dirPath, fileName))
         
     def run(self, vhost=None):
         """
@@ -273,7 +282,8 @@ class Reader(object):
         for fileName in os.listdir(self.dirPath):
             if 'access.log' not in fileName:
                 continue
-            d = self.q.call(self.processFile, fileName, vhost)
+            d = self.q.call(
+                self.parser, fileName, vhost)
             d.addCallbacks(gotSomeRecords, self.oops)
             dList.append(d)
         return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
