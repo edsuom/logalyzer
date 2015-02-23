@@ -10,7 +10,9 @@ Copyright (C) 2014-2015 Tellectual LLC
 import re, os, os.path, gzip
 from datetime import datetime
 
-from twisted.internet import defer, reactor, threads
+from twisted.internet import defer, reactor
+
+from asynqueue import ProcessQueue
 
 
 def rdb(sep, *args):
@@ -81,6 +83,7 @@ class Reader(object):
     """
     I read and parse web server log files
     """
+    cores = 2
     verbose = True
 
     reTwistdPrefix = rc(
@@ -129,6 +132,7 @@ class Reader(object):
         self.dirPath = logDir
         self.exclude, self.noUA = exclude, noUA
         self.compiler = Compiler(self.verbose)
+        self.q = ProcessQueue(self.cores)
 
     def msg(self, line):
         if self.verbose:
@@ -250,6 +254,7 @@ class Reader(object):
             if record:
                 records.append(record)
         fh.close()
+        return records
         
     def run(self, vhost=None):
         """
@@ -261,13 +266,14 @@ class Reader(object):
                 self.compiler.addRecord(record)
 
         def allDone(null):
-            return self.compile.getRecords()
+            return self.q.shutdown().addBoth(
+                lambda _ : self.compiler.getRecords())
         
         dList = []
         for fileName in os.listdir(self.dirPath):
             if 'access.log' not in fileName:
                 continue
-            d = threads.deferToThread(processFile, fileName, vhost)
+            d = self.q.call(self.processFile, fileName, vhost)
             d.addCallbacks(gotSomeRecords, self.oops)
             dList.append(d)
         return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
