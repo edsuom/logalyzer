@@ -18,10 +18,12 @@ import ip
 
 class TestIPMatcher(tb.TestCase):
     def setUp(self):
-        self.ip = ip.IPMatcher(os.path.join(tb.moduleDir(parent=True), "lists"))
+        self.ip = ip.IPMatcher()
+        self.rulePath = os.path.join(
+            tb.moduleDir(parent=True), "lists", "russians.txt")
 
     def test_addRules(self):
-        self.ip.addRules("russians.txt")
+        self.ip.addRules(self.rulePath)
         cases = (
             "109.207.200.0/21",
             "109.227.64.0/18",
@@ -40,10 +42,11 @@ class TestIPMatcher(tb.TestCase):
             ("109.206.250.240", False),
             ("109.227.67.33",   True))
         # All False until rules are loaded
-        #for thisIP, expectMatch in cases:
-        #    self.assertEqual(self.ip(thisIP), False)
-        # Load rules and try again
-        self.ip.addRules("russians.txt")
+        for thisIP, expectMatch in cases:
+            self.assertEqual(self.ip(thisIP), False)
+        # Load rules, clear cache, and try again
+        self.ip.clearCache()
+        self.ip.addRules(self.rulePath)
         for thisIP, expectMatch in cases:
             self.assertEqual(self.ip(thisIP), expectMatch, thisIP)
         

@@ -14,6 +14,8 @@ from twisted.internet import defer, reactor
 
 from asynqueue import *
 
+import ip
+
 
 def rdb(sep, *args):
     """
@@ -33,6 +35,9 @@ def rc(*parts):
 
 
 class RecordKeeper(object):
+    """
+    I keep timestamp-keyed log records.
+    """
     secondsInDay = 24 * 60 * 60
     secondsInHour = 60 * 60
 
@@ -75,6 +80,7 @@ class RecordKeeper(object):
 
 class Parser(object):
     """
+    I parse logfile lines to generate timestamp-keyed records
     """
     verbose = False
     
@@ -118,11 +124,18 @@ class Parser(object):
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-    def __init__(self, exclude, noUA):
-        self.exclude = exclude
-        self.noUA = noUA
+    def __init__(self, exclude, noUA, ipMatcher=None):
+        self.exclude, self.noUA = exclude, noUA
+        if ipMatcher is not None:
+            self.ipMatcher = ipMatcher
         self.rk = RecordKeeper()
 
+    def ipMatcher(self, ip):
+        """
+        Never matches any IP address if no ipMatcher supplied.
+        """
+        return False
+        
     def msg(self, line):
         if self.verbose:
             print "\n{}".format(line)
@@ -200,6 +213,9 @@ class Parser(object):
             # Bogus line
             return
         thisVhost, ip, dt, url, code, ref, ua = stuff
+        if self.ipMatcher(ip):
+            # Excluded IP address
+            return
         if vhost is None:
             record = [thisVhost, ip, url]
         elif thisVhost == vhost:
@@ -235,16 +251,26 @@ class Reader(object):
     """
     I read and parse web server log files
     """
-    cores = 4
+    cores = 3 # Leave one for the main process and GUI responsiveness
     verbose = True
 
-    def __init__(self, logDir, exclude=[], noUA=False, verbose=False):
+    def __init__(
+            self, logDir,
+            exclude=[], noUA=False, ruleFiles=[], verbose=False):
+        #----------------------------------------------------------------------
         if not os.path.isdir(logDir):
             raise OSError("Directory '{}' not found".format(logDir))
         self.dirPath = logDir
         self.records = {}
+        if ruleFiles:
+            ipMatcher = ip.IPMatcher()
+            for filePath in ruleFiles:
+                ipMatcher.addRules(filePath)
+        else:
+            ipMatcher = None
+        parser = Parser(exclude, noUA, ipMatcher)
         #self.q = BogusQueue()
-        self.q = ProcessQueue(self.cores, parser=Parser(exclude, noUA))
+        self.q = ProcessQueue(self.cores, parser=parser)
         if verbose:
             self.verbose = True
         
