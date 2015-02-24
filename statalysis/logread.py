@@ -124,10 +124,12 @@ class Parser(object):
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-    def __init__(self, exclude, noUA, ipMatcher=None):
+    def __init__(self, exclude, noUA, ipMatcher=None, uaMatcher=None):
         self.exclude, self.noUA = exclude, noUA
         if ipMatcher is not None:
             self.ipMatcher = ipMatcher
+        if uaMatcher is not None:
+            self.uaMatcher = uaMatcher
         self.rk = RecordKeeper()
 
     def ipMatcher(self, ip):
@@ -135,7 +137,13 @@ class Parser(object):
         Never matches any IP address if no ipMatcher supplied.
         """
         return False
-        
+
+    def uaMatcher(self, ua):
+        """
+        Never matches any UA string if no uaMatcher supplied.
+        """
+        return False
+    
     def msg(self, line):
         if self.verbose:
             print "\n{}".format(line)
@@ -226,6 +234,9 @@ class Parser(object):
             if code in self.exclude:
                 # Excluded code
                 return
+        if self.uaMatcher(ua):
+            # Excluded UA string
+            return
         if self.ipMatcher(ip):
             # Excluded IP address (check last because time-consuming)
             return
@@ -255,7 +266,7 @@ class Reader(object):
 
     def __init__(
             self, logDir,
-            exclude=[], noUA=False, ruleFiles=[], verbose=False):
+            exclude=[], noUA=False, ruleFiles=[], uaFile=None, verbose=False):
         #----------------------------------------------------------------------
         if not os.path.isdir(logDir):
             raise OSError("Directory '{}' not found".format(logDir))
@@ -267,7 +278,11 @@ class Reader(object):
                 ipMatcher.addRules(filePath)
         else:
             ipMatcher = None
-        parser = Parser(exclude, noUA, ipMatcher)
+        if uaFile:
+            uaMatcher = sift.UAMatcher(uaFile)
+        else:
+            uaMatcher = None
+        parser = Parser(exclude, noUA, ipMatcher, uaMatcher)
         #self.q = BogusQueue()
         self.q = ProcessQueue(self.cores, parser=parser)
         if verbose:

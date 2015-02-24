@@ -13,12 +13,25 @@ from collections import deque
 import ipcalc
 
 
-class IPMatcher(object):
+class MatcherBase(object):
     """
-    I efficiently match IP addresses with rules
+    Build your matcher on me
     """
     N_cache = 20
     
+    def fileLinerator(self, filePath):
+        fh = open(filePath, 'rb')
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            yield line.strip()
+        fh.close()
+
+
+class IPMatcher(MatcherBase):
+    """
+    I efficiently match IP addresses with rules
+    """
     reRule = re.compile(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/[123]{0,1}[0-9])')
     
     def __init__(self):
@@ -35,10 +48,7 @@ class IPMatcher(object):
         """
         Add some rules from a text file with lines in aaa.bbb.ccc.ddd/ee notation
         """
-        fh = open(filePath, 'rb')
-        for line in fh:
-            if line.startswith("#"):
-                continue
+        for line in self.fileLinerator(filePath):
             match = self.reRule.match(line)
             if match is None:
                 continue
@@ -59,7 +69,6 @@ class IPMatcher(object):
                 # New long network address, add both it and the network object
                 self.longs.append(thisLong)
                 self.networks.append(thisNet)
-        fh.close()
 
     def __call__(self, ip):
         net = ipcalc.Network(ip)
@@ -80,8 +89,28 @@ class IPMatcher(object):
         return False
 
 
+class UAMatcher(MatcherBase):
+    """
+    I efficiently match User Agent strings with regular expressions
+    """
+    def __init__(self, uaFilePath):
+        self.lastUA, self.lastResult = "", False
+        self.reParts = []
+        for line in self.fileLinerator(filePath):
+            self.reParts.append(line)
+            
+    def __call__(self, uaString):
+        # Compiled RE should be fast enough that only the most
+        # rudimentary caching makes sense
+        if uaString == self.lastUA:
+            return self.lastResult
+        self.lastUA = uaString
+        if not hasattr(self, 'reUA'):
+            self.reUA = re.compile(r'|'.join(self.reParts))
+        self.lastResult = bool(self.reUA.search(uaString))
+        return self.lastResult
     
-        
+                    
             
             
             

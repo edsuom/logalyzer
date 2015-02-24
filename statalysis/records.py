@@ -34,7 +34,11 @@ Directory for file(s) containing IP exclusion rules
 Rules corresponding to .txt files in ruledir containing IP exclusion rules in
 aaa.bbb.ccc.ddd/ee notation
 
--u, --omituseragent
+-u, --ua file
+File containing regular expressions (case sensitive) that match User
+Agent strings to exclude
+
+--omit
 Omit the user-agent string from the records
 
 -v, --verbose
@@ -85,8 +89,9 @@ class Recorder(object):
         return logread.Reader(
             self.logDir,
             exclude=exclude,
-            noUA=self.opt['u'],
+            noUA=self.opt['omit'],
             ruleFiles=ruleFiles,
+            uaFile=self.opt['u'],
             verbose=self.opt['v'])
 
     def _oops(self, failure):
