@@ -28,9 +28,12 @@ class MatcherBase(object):
         self.caches.append(thisCache)
         return len(self.caches) - 1
 
-    def clearCache(self):
+    def clearCache(self, value=None):
         for cache in self.caches:
-            cache.clear()
+            if value is None:
+                cache.clear()
+            while cache.count(value):
+                cache.remove(value)
     
     def checkCache(self, k, x):
         """
@@ -66,9 +69,9 @@ class IPMatcher(MatcherBase):
     """
     reRule = re.compile(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/[123]{0,1}[0-9])')
     
-    def __init__(self):
+    def __init__(self, ):
         self.networks = []
-        # Cache for Offenders
+        # Cache for offenders
         self.newCache()
         # Cache for innocents
         self.newCache()
@@ -109,8 +112,11 @@ class IPMatcher(MatcherBase):
         Call this with an IP address (string format) to add it to my list
         of offenders.
         """
-        self.ipLongs.append(long(ipcalc.IP(ip)))
-                
+        ipLong = long(ipcalc.IP(ip))
+        if ipLong not in self.ipLongs:
+            self.ipLongs.append(ipLong)
+            self.clearCache(ip)
+    
     def __call__(self, ip):
         # Likely to be several sequential hits from offenders and
         # innocents alike
@@ -166,7 +172,17 @@ class UAMatcher(MatcherBase):
         self.setCache(1, ip)
         return False
 
-    
+
+class BotMatcher(MatcherBase):
+    def __init__(self, urlFilePath):
+        reParts = []
+        for line in self.fileLinerator(uaFilePath):
+            reParts.append(line)
+        self.reUA = re.compile(r'|'.join(reParts))
+        
+    def __call__(self, url):
+        return bool(self.reUA.search(url))
+
                     
             
             

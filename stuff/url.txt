@@ -1,0 +1,20 @@
+# Case-sensitive regular expressions for URLs indicating the client
+# wasn't human
+
+
+# Innocuous bots
+^/robots.txt
+^/sitemap.xml
+
+
+# Bad guys
+fckeditor
+/\w+\.php
+/tiny_mce/
+/etc/passwd
+/scripts/
+logitec\.se
+/account/
+//components/
+
+

@@ -103,8 +103,8 @@ class Recorder(object):
         """
         printRecords = self.opt['p']
         keys = sorted(records.keys())
-        cfh = open(self.csvFilePath, 'wb')
-        csvWriter = csv.writer(cfh)
+        #cfh = open(self.csvFilePath, 'wb')
+        #csvWriter = csv.writer(cfh)
         for dt in keys:
             rowBase = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
             if printRecords:
@@ -112,9 +112,12 @@ class Recorder(object):
             theseRecords = records[dt]
             for thisRecord in theseRecords:
                 if printRecords:
-                    print ", ".join([str(x) for x in thisRecord])
-                csvWriter.writerow(rowBase + thisRecord)
-        cfh.close()
+                    itemList = [
+                        "{}: {}".format(x, y)
+                        for x, y in thisRecord.iteritems()]
+                    print ", ".join(itemList)
+                #csvWriter.writerow(rowBase + thisRecord)
+        #cfh.close()
     
     def load(self, vhost):
         d = self.reader.run(vhost).addCallbacks(self._saveRecords, self._oops)
