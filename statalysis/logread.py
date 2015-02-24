@@ -213,9 +213,6 @@ class Parser(object):
             # Bogus line
             return
         thisVhost, ip, dt, url, code, ref, ua = stuff
-        if self.ipMatcher(ip):
-            # Excluded IP address
-            return
         if vhost is None:
             record = [thisVhost, ip, url]
         elif thisVhost == vhost:
@@ -229,8 +226,10 @@ class Parser(object):
             if code in self.exclude:
                 # Excluded code
                 return
-        else:
-            record.append(code)
+        if self.ipMatcher(ip):
+            # Excluded IP address (check last because time-consuming)
+            return
+        record.append(code)
         return dt, record
 
     def __call__(self, fileName, vhost):
