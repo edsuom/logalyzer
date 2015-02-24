@@ -13,12 +13,12 @@ import ipcalc
 
 import testbase as tb
 
-import ip
+import sift
 
 
 class TestIPMatcher(tb.TestCase):
     def setUp(self):
-        self.ip = ip.IPMatcher()
+        self.ip = sift.IPMatcher()
         self.rulePath = os.path.join(
             tb.moduleDir(parent=True), "lists", "russians.txt")
 

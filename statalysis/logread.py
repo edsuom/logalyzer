@@ -14,7 +14,7 @@ from twisted.internet import defer, reactor
 
 from asynqueue import *
 
-import ip
+import sift
 
 
 def rdb(sep, *args):
@@ -262,7 +262,7 @@ class Reader(object):
         self.dirPath = logDir
         self.records = {}
         if ruleFiles:
-            ipMatcher = ip.IPMatcher()
+            ipMatcher = sift.IPMatcher()
             for filePath in ruleFiles:
                 ipMatcher.addRules(filePath)
         else:
