@@ -12,7 +12,7 @@ from datetime import datetime
 
 from twisted.internet import defer, reactor
 
-from asynqueue import ProcessQueue
+from asynqueue import *
 
 
 def rdb(sep, *args):
@@ -32,57 +32,51 @@ def rc(*parts):
     return re.compile(rexp)
 
 
-class Compiler(object):
-    """
-    I compile logfile records into a single big mass, chronologically
-    sorted.
-    """
-    def __init__(self, verbose=False):
-        self.dtLast = None
-        self.records = {}
-        self.verbose = verbose
+class RecordKeeper(object):
+    secondsInDay = 24 * 60 * 60
+    secondsInHour = 60 * 60
 
-    def addRecord(self, record):
-        dt = record[0]
-        rest = record[1:]
+    def __init__(self):
+        self.records = {}
+        self.newKeys = []
+
+    def seconds(self, dt):
+        return self.secondsInDay * dt.toordinal() +\
+            self.secondsInHour * dt.hour +\
+            60 * dt.minute +\
+            dt.second
+
+    def add(self, dt, record):
+        #sec = self.seconds(dt)
         if dt in self.records:
             thoseRecords = self.records[dt]
-            if rest not in thoseRecords:
-                thoseRecords.append(rest)
-            # Otherwise, its a duplicate record
+            if record in thoseRecords:
+                # Duplicate record, ignore
+                return
+            thoseRecords.append(record)
         else:
             # First record with this timestamp
-            self.records[dt] = [rest]
+            self.records[dt] = [record]
+        # Record was added, include it in the next get
+        self.newKeys.append(dt)
 
-    def printDatetime(self, dt):
-        pass
-        #if self.verbose:
-        #    print "\n{}".format(dt.isoformat(' '))
+    def clear(self):
+        self.newKeys = []
 
-    def printRecord(self, record):
-        pass
-        #if self.verbose:
-        #    print "{:15s}  {}".format(record[0], record[1][:50])
-
-    def getRecords(self):
+    def get(self):
         """
-        Returns my records in chronological order.
+        Returns the records added since the last clearing
         """
-        records = self.records
-        keys = records.keys()
-        keys.sort()
-        result = []
-        for key in keys:
-            theseRecords = records[key]
-            for thisRecord in theseRecords:
-                result.append(thisRecord)
-        return result
+        newRecords = {}
+        for key in self.newKeys:
+            newRecords[key] = self.records[key]
+        return newRecords
 
 
 class Parser(object):
     """
     """
-    verbose = True
+    verbose = False
     
     reTwistdPrefix = rc(
         rdb("-", 4, 2, 2),              # 1111-22-33
@@ -127,20 +121,21 @@ class Parser(object):
     def __init__(self, exclude, noUA):
         self.exclude = exclude
         self.noUA = noUA
+        self.rk = RecordKeeper()
 
     def msg(self, line):
         if self.verbose:
             print "\n{}".format(line)
     
-    def file(self, fileName):
+    def file(self, filePath):
         """
         Opens a file (possibly a compressed one), returning a file
         object.
         """
-        if fileName.endswith('.gz'):
-            fh = gzip.open(fileName, 'rb')
+        if filePath.endswith('.gz'):
+            fh = gzip.open(filePath, 'rb')
         else:
-            fh = open(fileName, mode="r")
+            fh = open(filePath, mode="r")
         return fh
 
     def dtFactory(self, *args):
@@ -206,9 +201,9 @@ class Parser(object):
             return
         thisVhost, ip, dt, url, code, ref, ua = stuff
         if vhost is None:
-            record = [thisVhost, dt, ip, url]
-        elif thisVhost != vhost:
-            record = [dt, ip, url]
+            record = [thisVhost, ip, url]
+        elif thisVhost == vhost:
+            record = [ip, url]
         else:
             # Excluded vhost
             return
@@ -220,38 +215,43 @@ class Parser(object):
                 return
         else:
             record.append(code)
-        return record
+        return dt, record
 
     def __call__(self, fileName, vhost):
         """
         The public interface to all the parsing.
         """
-        records = []
+        self.rk.clear()
         fh = self.file(fileName)
         for line in fh:
-            record = self.makeRecord(line, vhost)
-            if record:
-                records.append(record)
+            stuff = self.makeRecord(line, vhost)
+            if stuff:
+                self.rk.add(*stuff)
         fh.close()
-        return records
+        return self.rk.get()
 
     
 class Reader(object):
     """
     I read and parse web server log files
     """
-    cores = 2
+    cores = 4
     verbose = True
 
-    def __init__(self, logDir, exclude=[], noUA=False):
+    def __init__(self, logDir, exclude=[], noUA=False, verbose=False):
         if not os.path.isdir(logDir):
             raise OSError("Directory '{}' not found".format(logDir))
         self.dirPath = logDir
-        self.compiler = Compiler(self.verbose)
-        self.parser = Parser(exclude, noUA)
-        self.q = ProcessQueue(self.cores)
-        #parser=Parser(exclude, noUA)
+        self.records = {}
+        #self.q = BogusQueue()
+        self.q = ProcessQueue(self.cores, parser=Parser(exclude, noUA))
+        if verbose:
+            self.verbose = True
         
+    def msg(self, text):
+        if self.verbose:
+            print text
+
     def oops(self, failure):
         failure.raiseException()
         reactor.stop()
@@ -265,26 +265,34 @@ class Reader(object):
                 "Path '{}' specified, use file name only".format(fileName))
         return os.path.abspath(os.path.join(self.dirPath, fileName))
         
+    def addUniqueRecords(self, records):
+        for key, theseRecords in records.iteritems():
+            thoseRecords = self.records.setdefault(key, [])
+            for thisRecord in theseRecords:
+                if thisRecord not in thoseRecords:
+                    thoseRecords.append(thisRecord)
+
     def run(self, vhost=None):
         """
         Runs everything in twisted fashion. Why? Because I'm a glutton for
         punishment.
         """
-        def gotSomeRecords(records):
-            for record in records:
-                self.compiler.addRecord(record)
+        def gotSomeRecords(records, fileName):
+            self.msg(" {}: {:d} records".format(fileName, len(records)))
+            self.addUniqueRecords(records)
 
         def allDone(null):
-            return self.q.shutdown().addBoth(
-                lambda _ : self.compiler.getRecords())
+            return self.q.shutdown().addBoth(lambda _ : self.records)
         
         dList = []
         for fileName in os.listdir(self.dirPath):
             if 'access.log' not in fileName:
                 continue
+            self.msg(fileName)
             d = self.q.call(
-                self.parser, fileName, vhost)
-            d.addCallbacks(gotSomeRecords, self.oops)
+                'parser', self.pathInDir(fileName), vhost)
+            d.addCallback(gotSomeRecords, fileName)
+            d.addErrback(self.oops)
             dList.append(d)
         return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
 

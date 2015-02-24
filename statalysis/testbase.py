@@ -5,7 +5,7 @@
 
 import re, os, os.path, shutil, inspect, atexit
 
-import unittest
+from twisted.trial import unittest
 
 
 VERBOSE = True
@@ -46,9 +46,6 @@ def tempFiles(*args):
     for fileName in args:
         atexit.register(deleteIfExists, fileName)
     return args
- 
-def main():
-    return unittest.main()
 
 
 class TF(object):

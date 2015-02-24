@@ -25,6 +25,8 @@ A particular virtual host of interest
 -p, --print
 Print records after loading
 
+-e, --exclude exclude
+Exclude HTTP code(s) (comma separated list, no spaces)
 
 LICENSE
 Copyright (C) 2015 Tellectual LLC
@@ -39,10 +41,11 @@ from twisted.internet import reactor
 import logread
 
 
-class RecordKeeper(object):
+class Recorder(object):
     """
+    I load records from a Reader and save them in a CSV file
     """
-    def __init__(self, csvFilePath, printRecords=False):
+    def __init__(self, csvFilePath, printRecords=False, exclude=[]):
         self.csvFilePath = csvFilePath
         self.printRecords = printRecords
         logDir = os.path.dirname(os.path.abspath(csvFilePath))
@@ -51,17 +54,25 @@ class RecordKeeper(object):
     def oops(self, failure):
         failure.raiseException()
 
-    def load(self, vhost):
-        def gotRecords(records):
+    def saveRecords(self, records):
+        keys = sorted(records.keys())
+        cfh = open(self.csvFilePath, 'wb')
+        csvWriter = csv.writer(cfh)
+        for dt in keys:
+            rowBase = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
             if self.printRecords:
-                print records
-            with open(self.csvFilePath, 'wb') as cfh:
-                csvWriter = csv.writer(cfh)
-                for record in records:
-                    csvWriter.writerow(record)
-            reactor.stop()
-        
-        return self.reader.run(vhost).addCallbacks(gotRecords, self.oops)
+                print "\n{:4d}-{:02d}-{:02d}, {:02d}:{:02d}".format(*rowBase)
+            theseRecords = records[dt]
+            for thisRecord in theseRecords:
+                if self.printRecords:
+                    print ", ".join([str(x) for x in thisRecord])
+                csvWriter.writerow(rowBase + thisRecord)
+        cfh.close()
+    
+    def load(self, vhost):
+        d = self.reader.run(vhost).addCallbacks(self.saveRecords, self.oops)
+        d.addCallbacks(lambda _ : reactor.stop(), self.oops)
+        return d
 
     def run(self, vhost=None):
         reactor.callWhenRunning(self.load, vhost)
@@ -71,7 +82,12 @@ class RecordKeeper(object):
 def run():
     import ezopt
     opts = ezopt.Opt(__file__)
-    rk = RecordKeeper(opts[0], printRecords=opts['p'])
+    exclude = opts['e']
+    if exclude:
+        exclude = [int(x.strip()) for x in exclude.split(',')]
+    else:
+        exclude = []
+    rk = Recorder(opts[0], printRecords=opts['p'], exclude=exclude)
     rk.run(opts['vhost'])
 
 
