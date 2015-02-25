@@ -3,11 +3,18 @@
 
 
 # Innocuous bots
-^/robots.txt
-^/sitemap.xml
+#------------------------------------------------------------------------------
+# Commented out because don't want to take the chance of accidentally
+# blocking search engines if I use this for iptables
+#------------------------------------------------------------------------------
+#^/robots.txt
+#^/sitemap.xml
 
 
 # Bad guys
+#------------------------------------------------------------------------------
+# Anyone who attempts to access URLs matching these should be summarily blocked
+#------------------------------------------------------------------------------
 fckeditor
 /\w+\.php
 /tiny_mce/
@@ -16,5 +23,6 @@ fckeditor
 logitec\.se
 /account/
 //components/
+
 
 

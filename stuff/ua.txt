@@ -26,6 +26,7 @@ coccoc
 binlar
 A6-Indexer
 Google-SearchByImage
+FlipboardProxy
 
 
 # Potentially malicious
