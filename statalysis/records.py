@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 # UTF-8. That’s cool!
 
-"""NAME
+"""
+NAME
 statalysis: Analyzes web server log files
 
 
@@ -35,8 +36,13 @@ Rules corresponding to .txt files in ruledir containing IP exclusion rules in
 aaa.bbb.ccc.ddd/ee notation
 
 -u, --ua file
-File containing regular expressions (case sensitive) that match User
-Agent strings to exclude
+File containing regular expressions (case sensitive) that match
+User-Agent strings to exclude
+
+-b, --bot file
+File containing regular expressions (case sensitive) that match url
+strings indicating a bot. All records from IP with bot behavior will
+be omitted.
 
 --omit
 Omit the user-agent string from the records
@@ -47,7 +53,6 @@ Run verbosely
 
 LICENSE
 Copyright (C) 2015 Tellectual LLC
-
 """
 
 import os.path, csv
@@ -92,6 +97,7 @@ class Recorder(object):
             noUA=self.opt['omit'],
             ruleFiles=ruleFiles,
             uaFile=self.opt['u'],
+            urlFile=self.opt['b'],
             verbose=self.opt['v'])
 
     def _oops(self, failure):

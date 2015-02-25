@@ -64,6 +64,7 @@ class RecordKeeper(object):
         if ip in self.ipList:
             # Already purged
             return
+        removedKeys = []
         for key, recordList in self.records.iteritems():
             for record in recordList:
                 if record['ip'] == ip:
@@ -72,8 +73,11 @@ class RecordKeeper(object):
                     purgeList()
                     break
             if not recordList:
-                # The whole list was removed, so remove the key
-                del self.records[key]
+                # The whole list was removed, so we will remove the key
+                removedKeys.append(key)
+        # Remove keys
+        for key in removedKeys:
+            self.records.pop(key, None)
         # Add the IP
         self.ipList.append(ip)
         
@@ -115,7 +119,9 @@ class RecordKeeper(object):
         """
         newRecords = {}
         for key in self.newKeys:
-            newRecords[key] = self.records[key]
+            if key in self.records:
+                # Not purged and new, so get it
+                newRecords[key] = self.records[key]
         return self.ipList, newRecords
     
     
@@ -184,7 +190,7 @@ class Parser(object):
         """
         return False
 
-    def uaMatcher(self, ua):
+    def uaMatcher(self, ip, uaString):
         """
         Never matches any UA string if no uaMatcher supplied.
         """
@@ -295,7 +301,7 @@ class Parser(object):
             if code in self.exclude:
                 # Excluded code
                 return
-        if self.uaMatcher(ua):
+        if self.uaMatcher(ip, ua):
             # Excluded UA string
             return
         if self.botMatcher(url):

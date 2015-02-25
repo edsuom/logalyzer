@@ -176,14 +176,9 @@ class UAMatcher(MatcherBase):
 class BotMatcher(MatcherBase):
     def __init__(self, urlFilePath):
         reParts = []
-        for line in self.fileLinerator(uaFilePath):
+        for line in self.fileLinerator(urlFilePath):
             reParts.append(line)
         self.reUA = re.compile(r'|'.join(reParts))
         
     def __call__(self, url):
         return bool(self.reUA.search(url))
-
-                    
-            
-            
-            
