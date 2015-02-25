@@ -130,9 +130,9 @@ class Recorder(Base):
     csvDelimiter = '\t'
     
     ruleTable = (
-        ('n', "IPMatcher"),
-        ('u', "UAMatcher"),
-        ('b', "botMatcher"))
+        ('n', "net", "IPMatcher"),
+        ('u', "ua", "UAMatcher"),
+        ('b', "url", "botMatcher"))
 
     headings = {
         'vhost': "Virtual Host",
