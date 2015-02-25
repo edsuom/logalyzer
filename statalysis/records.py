@@ -127,15 +127,26 @@ class Recorder(Base):
     """
     I load records from a Reader and save them in a CSV file
     """
+    csvDelimiter = '\t'
+    
     ruleTable = (
         ('n', "IPMatcher"),
         ('u', "UAMatcher"),
         ('b', "botMatcher"))
+
+    headings = {
+        'vhost': "Virtual Host",
+        'ip':    "IP Address",
+        'url':   "URL Requested",
+        'code':  "HTTP",
+        'ref':   "Referrer",
+        'ua':    "User Agent",
+        }
     
     def __init__(self, opt):
         self.opt = opt
         self.csvFilePath = opt[0]
-        self.logDir = self.dirOfPath(self.csvFilePath)
+        self.myDir = self.dirOfPath(self.csvFilePath)
         
     def readerFactory(self):
         """
@@ -145,7 +156,7 @@ class Recorder(Base):
         self.verbose = self.opt['v']
         rulesDir = self.opt['d']
         if rulesDir is None:
-            rulesDir = self.logDir
+            rulesDir = self.myDir
         self.msg("Loading rules from '{}'", rulesDir, '-')
         self.msg("Exclusions:")
         exclude = self.cvsTextToList(self.opt['e'], int)
@@ -155,7 +166,7 @@ class Recorder(Base):
         for optKey, extension, matcherName in self.ruleTable:
             rules[matcherName] = rr(extension, self.opt[optKey])
         return logread.Reader(
-            self.logDir, rules,
+            self.myDir, rules,
             exclude=exclude, noUA=self.opt['omit'], verbose=self.verbose)
 
     def _oops(self, failure):
@@ -165,10 +176,27 @@ class Recorder(Base):
         """
         Callback to save records returned from my reader
         """
+        def makeRow(x):
+            row = []
+            if 'vhost' in fields:
+                row.append(x['vhost'])
+            for field in ('ip', 'url', 'code', 'ref'):
+                row.append(x[field])
+            if 'ua' in fields:
+                row.append(x['ua'])
+            return row
+        
+        def writeRow(x):
+            row = makeRow(x)
+            csvWriter.writerow(rowBase + row)
+        
         printRecords = self.opt['p']
         keys = sorted(records.keys())
-        #cfh = open(self.csvFilePath, 'wb')
-        #csvWriter = csv.writer(cfh)
+        cfh = open(self.csvFilePath, 'wb')
+        csvWriter = csv.writer(cfh, delimiter=self.csvDelimiter)
+        rowBase = ["Year", "Mo", "Day", "Hr", "Min"]
+        fields = records[keys[0]][0]
+        writeRow(self.headings)
         for dt in keys:
             rowBase = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
             if printRecords:
@@ -180,8 +208,8 @@ class Recorder(Base):
                         "{}: {}".format(x, y)
                         for x, y in thisRecord.iteritems()]
                     print ", ".join(itemList)
-                #csvWriter.writerow(rowBase + thisRecord)
-        #cfh.close()
+                writeRow(thisRecord)
+        cfh.close()
     
     def load(self, vhost):
         d = self.reader.run(vhost).addCallbacks(self._saveRecords, self._oops)
