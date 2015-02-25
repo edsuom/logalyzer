@@ -7,31 +7,15 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 """
 
-import re, os, os.path, gzip
+import re, gzip
 from datetime import datetime
 
 from twisted.internet import defer, reactor
 
 from asynqueue import *
 
+from util import *
 import sift
-
-
-def rdb(sep, *args):
-    """
-    Builds a regular expression for separated digits.
-    """
-    parts = []
-    for numDigits in args:
-        parts.append(r'(\d{{{:d}}})'.format(numDigits))
-    return sep.join(parts)
-
-def rc(*parts):
-    """
-    Compiles a regular expression from whitespace-separated parts.
-    """
-    rexp = r'\s+'.join(parts) + r'\s*$'
-    return re.compile(rexp)
 
 
 class RecordKeeper(object):
@@ -125,12 +109,15 @@ class RecordKeeper(object):
         return self.ipList, newRecords
     
     
-class Parser(object):
+class Parser(Base):
     """
     I parse logfile lines to generate timestamp-keyed records
+
+    Instantiate me with a dict of matchers (ipMatcher, uaMatcher,
+    and/or botMatcher). If you want to exclude any HTTP codes, list
+    them with exclude. To omit the User-Agent field from the records,
+    set noUA=True.
     """
-    verbose = False
-    
     reTwistdPrefix = rc(
         rdb("-", 4, 2, 2),              # 1111-22-33
         rdb(":", 2, 2, 2) + r'\+\d+',   # 44-55-66
@@ -171,18 +158,19 @@ class Parser(object):
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-    def __init__(
-            self, exclude, noUA,
-            ipMatcher=None, uaMatcher=None, botMatcher=None):
-        #----------------------------------------------------------------------
-        self.exclude, self.noUA = exclude, noUA
-        if ipMatcher is not None:
-            self.ipMatcher = ipMatcher
-        if uaMatcher is not None:
-            self.uaMatcher = uaMatcher
-        if botMatcher is not None:
-            self.botMatcher = botMatcher
+    matcherTable = (
+        ('ipMatcher', 'IPMatcher'),
+        ('uaMatcher', 'UAMatcher'),
+        ('botMatcher', 'BotMatcher'))
+
+    def __init__(self, matchers, exclude=[], noUA=False, verbose=False):
+        for callableName, matcherName in self.matcherTable:
+            if matcherName in matchers:
+                setattr(self, callableName, matcherName)
         self.rk = RecordKeeper()
+        self.exclude = exclude
+        self.noUA = noUA
+        self.verbose = verbose
 
     def ipMatcher(self, ip):
         """
@@ -201,11 +189,7 @@ class Parser(object):
         Never matches any url if no botMatcher supplied.
         """
         return False
-    
-    def msg(self, line):
-        if self.verbose:
-            print "\n{}".format(line)
-    
+
     def file(self, filePath):
         """
         Opens a file (possibly a compressed one), returning a file
@@ -329,58 +313,31 @@ class Parser(object):
         return self.rk.get()
 
     
-class Reader(object):
+class Reader(Base):
     """
     I read and parse web server log files
     """
     cores = 3 # Leave one for the main process and GUI responsiveness
-    verbose = True
 
     def __init__(
-            self, logDir,
-            exclude=[], noUA=False,
-            ruleFiles=[], uaFile=None, urlFile=None, verbose=False):
+            self, logDir, rules={},
+            exclude=[], noUA=False, verbose=False):
         #----------------------------------------------------------------------
-        if not os.path.isdir(logDir):
-            raise OSError("Directory '{}' not found".format(logDir))
-        self.dirPath = logDir
+        self.myDir = logDir
         self.rk = RecordKeeper()
-        if ruleFiles:
-            ipMatcher = sift.IPMatcher()
-            for filePath in ruleFiles:
-                ipMatcher.addRules(filePath)
-        else:
-            ipMatcher = None
-        if uaFile:
-            uaMatcher = sift.UAMatcher(uaFile)
-        else:
-            uaMatcher = None
-        if urlFile:
-            botMatcher = sift.BotMatcher(urlFile)
-        else:
-            botMatcher = None
-        parser = Parser(exclude, noUA, ipMatcher, uaMatcher, botMatcher)
+        matchers = {}
+        for matcherName, ruleList in rules.iteritems():
+            thisMatcher = getattr(sift, matcherName)(ruleList)
+            matchers[matcherName] = thisMatcher
+        parser = Parser(matchers, exclude, noUA, verbose)
         #self.q = BogusQueue()
         self.q = ProcessQueue(self.cores, parser=parser)
         if verbose:
             self.verbose = True
-        
-    def msg(self, text):
-        if self.verbose:
-            print text
 
-    def oops(self, failure):
+    def _oops(self, failure):
         failure.raiseException()
         reactor.stop()
-
-    def pathInDir(self, fileName):
-        """
-        Returns the absolute path of a file in my project directory
-        """
-        if os.path.split(fileName)[0]:
-            raise ValueError(
-                "Path '{}' specified, use file name only".format(fileName))
-        return os.path.abspath(os.path.join(self.dirPath, fileName))
 
     def run(self, vhost=None):
         """
@@ -399,16 +356,16 @@ class Reader(object):
             return self.q.shutdown().addBoth(lambda _ : self.rk.records)
         
         dList = []
-        for fileName in os.listdir(self.dirPath):
+        for fileName in self.filesInDir():
             if 'access.log' not in fileName:
                 continue
             self.msg(fileName)
             d = self.q.call(
                 'parser', self.pathInDir(fileName), vhost)
             d.addCallback(gotSomeResults, fileName)
-            d.addErrback(self.oops)
+            d.addErrback(self._oops)
             dList.append(d)
-        return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
+        return defer.DeferredList(dList).addCallbacks(allDone, self._oops)
 
         
             

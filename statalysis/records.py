@@ -8,7 +8,12 @@ statalysis: Analyzes web server log files
 
 
 SYNOPSIS
-sa [--vhost somehost.com] outFile
+sa [--vhost somehost.com]
+   [-p] [-e, --exclude code1,code2,...]
+   [-d, --ruledir <directory of rule files>]
+     [-r, --rules rule1,rule2,...]
+     [-u, --ua <file
+outFile
 
 
 DESCRIPTION
@@ -16,6 +21,9 @@ DESCRIPTION
 Analyzes log files in the directory where outFile is to go, producing
 outFile in CSV format.
 
+WARNING: If your bot rules match innocent search engines, e.g., with
+'/robots.txt', don't use the list from -i to block access to your web
+server!
 
 OPTIONS
 
@@ -29,29 +37,31 @@ Print records after loading
 Exclude HTTP code(s) (comma separated list, no spaces)
 
 -d, --ruledir ruledir
-Directory for file(s) containing IP exclusion rules
+Directory for .net, .ua, and .url file(s) containing IP, user-agent,
+and url exclusion rules
 
--r, --rules rules
-Rules corresponding to .txt files in ruledir containing IP exclusion rules in
-aaa.bbb.ccc.ddd/ee notation
+-n, --net rules
+Rules corresponding to .net files in ruledir containing IP network
+exclusion rules in aaa.bbb.ccc.ddd/ee notation
 
--u, --ua file
-File containing regular expressions (case sensitive) that match
-User-Agent strings to exclude
+-u, --ua rules
+Rules corresponding to .ua files containing regular expressions (case
+sensitive) that match User-Agent strings to exclude
 
--b, --bot file
-File containing regular expressions (case sensitive) that match url
-strings indicating a bot. All records from IP with bot behavior will
-be omitted.
+-b, --url rules
+Rules corresponding to .url files containing regular expressions (case
+sensitive) that match url strings indicating a malicious bot. All
+records from IP addresses with bot behavior will be purged.
 
 --omit
 Omit the user-agent string from the records
 
--s, --shelve
-Save as a Python shelf instead of a CSV file
+-s, --shelve file
+File in which to save a Python shelf of the records (the CSV file is
+still written)
 
 -i, --ip file
-Save purged IP addresses in the file
+File in which to save a list of the (unique) purged IP addresses.
 
 -v, --verbose
 Run verbosely
@@ -61,50 +71,92 @@ LICENSE
 Copyright (C) 2015 Tellectual LLC
 """
 
-import os.path, csv
+import csv
 
 from twisted.internet import reactor
 
+from util import Base
 import logread
 
 
-class Recorder(object):
+class RuleReader(Base):
+    """
+    I read rule files
+    """
+    def __init__(self, rulesDir, verbose=False):
+        self.myDir = rulesDir
+        self.verbose = verbose
+    
+    def linerator(self, filePath):
+        self.msg("Reading '{}'...", filePath, '-')
+        fh = open(filePath, 'rb')
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            self.msg("| {}", line)
+            yield line
+        fh.close()
+        
+    def rules(self, extension, csvList):
+        """
+        Supply a file extension and a comma-separated list of rules as a
+        string, and I'll read the rules from the corresponding files
+        in my rules directory, returning a list of their lines.
+
+        If an empty string or None is supplied, all the corresponding
+        rule files in the rules directory will be read.
+        """
+        def addExtension(x):
+            return "{}.{}".format(x, extension)
+
+        lines = []
+        nameList = self.csvTextToList(csvList, addExtension)
+        if not nameList:
+            nameList = [
+                x for x in self.filesInDir()
+                if x.endswith(".{}".format(extension))]
+        for fileName in nameList:
+            filePath = self.pathInDir(fileName)
+            for line in self.linerator(filePath):
+                lines.append(line)
+        return lines
+        
+
+class Recorder(Base):
     """
     I load records from a Reader and save them in a CSV file
     """
+    ruleTable = (
+        ('n', "IPMatcher"),
+        ('u', "UAMatcher"),
+        ('b', "botMatcher"))
+    
     def __init__(self, opt):
         self.opt = opt
         self.csvFilePath = opt[0]
-        self.logDir = os.path.dirname(os.path.abspath(self.csvFilePath))
-
-    def textToList(self, text, converter):
-        if text:
-            return [converter(x.strip()) for x in text.split(',')]
-        return []
+        self.logDir = self.dirOfPath(self.csvFilePath)
         
     def readerFactory(self):
-        ruleDir = self.opt['d']
-        verbose = self.opt['v']
-        if ruleDir:
-            print "Rules: ",
-            ruleFiles = []
-            for rule in self.textToList(self.opt['r'], lambda x: x+'.txt'):
-                rulePath = os.path.join(ruleDir, rule)
-                if not os.path.isfile(rulePath):
-                    raise ValueError(
-                        "Rule file '{}' not found".format(rulePath))
-                ruleFiles.append(rulePath)
-                print rule,
-        exclude = self.textToList(self.opt['e'], int)
-        print "Exclusions: ", exclude
+        """
+        I generate and return a log reader with all its rules loaded per
+        your command-line options
+        """
+        self.verbose = self.opt['v']
+        rulesDir = self.opt['d']
+        if rulesDir is None:
+            rulesDir = self.logDir
+        self.msg("Loading rules from '{}'", rulesDir, '-')
+        self.msg("Exclusions:")
+        exclude = self.cvsTextToList(self.opt['e'], int)
+        self.msg("| HTTP Codes: {}", ", ".join(exclude))
+        rules = {}
+        rr = RuleReader(rulesDir, self.verbose)
+        for optKey, extension, matcherName in self.ruleTable:
+            rules[matcherName] = rr(extension, self.opt[optKey])
         return logread.Reader(
-            self.logDir,
-            exclude=exclude,
-            noUA=self.opt['omit'],
-            ruleFiles=ruleFiles,
-            uaFile=self.opt['u'],
-            urlFile=self.opt['b'],
-            verbose=self.opt['v'])
+            self.logDir, rules,
+            exclude=exclude, noUA=self.opt['omit'], verbose=self.verbose)
 
     def _oops(self, failure):
         failure.raiseException()

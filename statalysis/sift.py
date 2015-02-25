@@ -17,6 +17,24 @@ class MatcherBase(object):
     """
     Build your matcher on me
     """
+    def __init__(self, rules):
+        self.startup(rules)
+
+    def reFromRules(self, rules):
+        reParts = []
+        for rule in rules:
+            rule = rule.strip()
+            if rule:
+                reParts.append(rule)
+        return re.compile(r'|'.join(reParts))
+        
+    def startup(self, rules):
+        """
+        Override this to process rule given as lines of text, one for each
+        rule.
+        """
+        raise NotImplementedError("Must define a startup method")
+    
     def newCache(self, N=30):
         """
         Generates the FIFO queue for a new sort-of LRU cache of strings
@@ -53,15 +71,6 @@ class MatcherBase(object):
         """
         self.caches[k].append(x)
 
-    def fileLinerator(self, filePath):
-        fh = open(filePath, 'rb')
-        for line in fh:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            yield line
-        fh.close()
-
 
 class IPMatcher(MatcherBase):
     """
@@ -69,7 +78,7 @@ class IPMatcher(MatcherBase):
     """
     reRule = re.compile(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/[123]{0,1}[0-9])')
     
-    def __init__(self, ):
+    def startup(self, rules):
         self.networks = []
         # Cache for offenders
         self.newCache()
@@ -79,33 +88,35 @@ class IPMatcher(MatcherBase):
         self.netLongs = array.array('L')
         # LongInt lookup table for known and added offenders
         self.ipLongs = array.array('L')
+        # Add the rules
+        for rule in rules:
+            self.addRule(rule)
     
-    def addRules(self, filePath):
+    def addRule(self, rule):
         """
-        Add some rules from a text file with lines in aaa.bbb.ccc.ddd/ee notation
+        Add a network matching rule in aaa.bbb.ccc.ddd/ee notation
         """
-        for line in self.fileLinerator(filePath):
-            match = self.reRule.match(line)
-            if match is None:
-                continue
-            thisNet = ipcalc.Network(match.group(0))
-            # Quick check
-            thisLong = thisNet.network_long()
-            if thisLong in self.netLongs:
-                # Same long network address, so do more thorough check
-                for otherNet in self.networks:
-                    if thisNet.check_collision(otherNet):
-                        # Yep, redundant rule
-                        break
-                else:
-                    # No collision, so actually NOT a redundant rule;
-                    # add it. (Will this ever happen with properly
-                    # defined rules?)
-                    self.networks.append(thisNet)
+        match = self.reRule.match(rule)
+        if match is None:
+            return
+        thisNet = ipcalc.Network(match.group(0))
+        # Quick check
+        thisLong = thisNet.network_long()
+        if thisLong in self.netLongs:
+            # Same long network address, so do more thorough check
+            for otherNet in self.networks:
+                if thisNet.check_collision(otherNet):
+                    # Yep, redundant rule
+                    break
             else:
-                # New long network address, add both it and the network object
-                self.netLongs.append(thisLong)
+                # No collision, so actually NOT a redundant rule;
+                # add it. (Will this ever happen with properly
+                # defined rules?)
                 self.networks.append(thisNet)
+        else:
+            # New long network address, add both it and the network object
+            self.netLongs.append(thisLong)
+            self.networks.append(thisNet)
 
     def addOffender(self, ip):
         """
@@ -146,15 +157,12 @@ class UAMatcher(MatcherBase):
     """
     I efficiently match User Agent strings with regular expressions
     """
-    def __init__(self, uaFilePath):
+    def startup(self, rules):
         # Cache for Offenders
         self.newCache()
         # Cache for innocents
         self.newCache()
-        reParts = []
-        for line in self.fileLinerator(uaFilePath):
-            reParts.append(line)
-        self.reUA = re.compile(r'|'.join(reParts))
+        self.reUA = self.reFromRules(rules)
     
     def __call__(self, ip, uaString):
         # Likely to be several sequential hits from offenders and
@@ -174,11 +182,8 @@ class UAMatcher(MatcherBase):
 
 
 class BotMatcher(MatcherBase):
-    def __init__(self, urlFilePath):
-        reParts = []
-        for line in self.fileLinerator(urlFilePath):
-            reParts.append(line)
-        self.reUA = re.compile(r'|'.join(reParts))
-        
+    def startup(self, rules):
+        self.reURL = self.reFromRules(rules)
+    
     def __call__(self, url):
-        return bool(self.reUA.search(url))
+        return bool(self.reURL.search(url))
