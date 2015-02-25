@@ -47,6 +47,12 @@ be omitted.
 --omit
 Omit the user-agent string from the records
 
+-s, --shelve
+Save as a Python shelf instead of a CSV file
+
+-i, --ip file
+Save purged IP addresses in the file
+
 -v, --verbose
 Run verbosely
 
