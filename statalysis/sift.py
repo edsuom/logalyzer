@@ -193,3 +193,11 @@ class BotMatcher(MatcherBase):
     
     def __call__(self, url):
         return bool(self.reURL.search(url))
+
+
+class RefMatcher(MatcherBase):
+    def startup(self, rules):
+        self.reReferrer = self.reFromRules(rules)
+    
+    def __call__(self, ref):
+        return bool(self.reReferrer.search(ref))

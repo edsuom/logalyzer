@@ -62,6 +62,9 @@ class RecordKeeper(object):
         other instances can purge their records of it, too.
 
         Any further adds from this IP are ignored.
+
+        Returns True if this was a new IP, False if not.
+
         """
         def purgeList():
             while True:
@@ -72,7 +75,7 @@ class RecordKeeper(object):
 
         if ip in self.ipList:
             # Already purged
-            return
+            return False
         removedKeys = []
         for key, recordList in self.records.iteritems():
             for record in recordList:
@@ -89,6 +92,7 @@ class RecordKeeper(object):
             self.records.pop(key, None)
         # Add the IP
         self.ipList.append(ip)
+        return True
         
     def seconds(self, dt):
         return self.secondsInDay * dt.toordinal() +\
@@ -180,15 +184,18 @@ class Parser(Base):
             rdb(":", 4, 2, 2, 2)
         )
 
-    reSecondary = re.compile(r'\.(jpg|jpeg|png|gif|css|ico)$')
+    reSecondary = re.compile(
+        r'(\.(jpg|jpeg|png|gif|css|ico|woff|ttf|svg|eot\??))' +\
+        r'|(robots\.txt|sitemap\.xml|googlecea.+\.html)$')
 
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
     matcherTable = (
-        ('ipMatcher', 'IPMatcher'),
-        ('uaMatcher', 'UAMatcher'),
-        ('botMatcher', 'BotMatcher'))
+        ('ipMatcher',  'IPMatcher'),
+        ('uaMatcher',  'UAMatcher'),
+        ('botMatcher', 'BotMatcher'),
+        ('refMatcher', 'RefMatcher'))
 
     def __init__(
             self, matchers,
@@ -224,6 +231,12 @@ class Parser(Base):
         """
         return False
 
+    def refMatcher(self, url):
+        """
+        Never matches any referrer string if no refMatcher supplied.
+        """
+        return False
+    
     def file(self, filePath):
         """
         Opens a file (possibly a compressed one), returning a file
@@ -312,17 +325,19 @@ class Parser(Base):
         if ip in self.rk.ipList:
             # Check first for purged IP
             return
-        # Then do some relatively easy exclusion checks
+        # Then do some relatively easy exclusion checks, starting with
+        # botMatcher and refMatcher so we can harvest the most bot IP
+        # addresses (useful if -i option set)
+        if self.botMatcher(url) or self.refMatcher(ref):
+            if self.rk.purgeIP(ip):
+                self.msg(line)
+            return
         if self.exclude:
             if code in self.exclude:
                 # Excluded code
                 return
         if self.uaMatcher(ip, ua):
             # Excluded UA string
-            return
-        if self.botMatcher(url):
-            self.msg(line)
-            self.rk.purgeIP(ip)
             return
         # OK, this is an approved record ... unless the vhost is
         # excluded, and unless there is an IP address match
@@ -347,7 +362,8 @@ class Parser(Base):
     
     def __call__(self, fileName):
         """
-        The public interface to all the parsing.
+        The public interface to parse a logfile. My processes call this
+        via the queue.
         """
         self.rk.clear()
         fh = self.file(fileName)
@@ -390,8 +406,9 @@ class Reader(Base):
 
     def run(self):
         """
-        Runs everything in twisted fashion. Why? Because I'm a glutton for
-        punishment.
+        Runs everything via the process queue (multiprocessing!),
+        returning a reference to my main-process recordkeeper with all
+        the results in it.
         """
         def gotSomeResults(results, fileName):
             ipList, records = results
@@ -402,7 +419,7 @@ class Reader(Base):
             self.rk.addRecords(records)
 
         def allDone(null):
-            return self.q.shutdown().addBoth(lambda _ : self.rk.records)
+            return self.q.shutdown().addBoth(lambda _ : self.rk)
         
         dList = []
         for fileName in self.filesInDir():

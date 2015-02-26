@@ -10,6 +10,8 @@ Copyright (C) 2014-2015 Tellectual LLC
 import os.path
 from datetime import datetime as dt
 
+from twisted.python import failure
+
 import testbase as tb
 
 import logread
@@ -133,18 +135,26 @@ class TestParser(tb.TestCase):
                            
 class TestReader(tb.TestCase):
     def setUp(self):
+        import sift
         self.r = logread.Reader(
             os.path.join(tb.moduleDir(parent=True), 'log'),
+            rules={'BotMatcher': tb.RULES_BOT},
             vhost="freedomtodoubt.com")
 
     def test_complains(self):
         self.assertRaises(OSError, logread.Reader, 'bogusdir')
         
     def test_run(self):
-        def gotRecords(records):
-            self.assertIsInstance(records, dict)
-            self.assertTrue(len(records) > 100)
+        def done(result):
+            if isinstance(result, failure.Failure):
+                result.raiseException()
+            else:
+                rk = result
+                self.assertIsInstance(rk.ipList, list)
+                self.assertTrue(len(rk.ipList) > 5)
+                self.assertIsInstance(rk.records, dict)
+                self.assertTrue(len(rk.records) > 100)
         
-        return self.r.run()
+        return self.r.run().addBoth(done)
         
             

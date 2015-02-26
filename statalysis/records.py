@@ -21,9 +21,11 @@ DESCRIPTION
 Analyzes log files in the directory where outFile is to go, producing
 outFile in CSV format.
 
-WARNING: If your bot rules match innocent search engines, e.g., with
-'/robots.txt', don't use the list from -i to block access to your web
-server!
+All records from IP addresses with bot behavior will be purged.
+
+WARNING: If any of your bot or referrer rules match innocent search
+engines, e.g., with '/robots.txt', don't use the list from -i to block
+access to your web server!
 
 OPTIONS
 
@@ -42,16 +44,26 @@ and url exclusion rules
 
 -n, --net rules
 Rules corresponding to .net files in ruledir containing IP network
-exclusion rules in aaa.bbb.ccc.ddd/ee notation
+exclusion rules in aaa.bbb.ccc.ddd/ee notation. Use x or X to skip all
+such rules are used; otherwise all in the directory will be used.
 
 -u, --ua rules
 Rules corresponding to .ua files containing regular expressions (case
-sensitive) that match User-Agent strings to exclude
+sensitive) that match User-Agent strings to exclude. Use x or X to
+skip all such rules are used; otherwise all in the directory will be
+used.
 
 -b, --url rules
 Rules corresponding to .url files containing regular expressions (case
-sensitive) that match url strings indicating a malicious bot. All
-records from IP addresses with bot behavior will be purged.
+sensitive) that match url strings indicating a malicious bot. Use x or
+X to skip all such rules are used; otherwise all in the directory will
+be used.
+
+-r, --referrer rules
+Rules corresponding to .ref files containing regular expressions (case
+sensitive) that match referrer strings indicating a malicious bot. Use
+x or X to skip all such rules are used; otherwise all in the directory
+will be used.
 
 --omit
 Omit the user-agent string from the records
@@ -111,6 +123,8 @@ class RuleReader(Base):
             return "{}.{}".format(x, extension)
 
         lines = []
+        if csvList in ['x', 'X']:
+            return []
         nameList = self.csvTextToList(csvList, addExtension)
         if not nameList:
             nameList = [
@@ -136,9 +150,10 @@ class Recorder(Base):
     
     ruleTable = (
         ('n', "net", "IPMatcher"),
-        ('u', "ua", "UAMatcher"),
-        ('b', "url", "BotMatcher"))
-
+        ('u', "ua",  "UAMatcher"),
+        ('b', "url", "BotMatcher"),
+        ('r', "ref", "RefMatcher"))
+    
     headings = {
         'vhost': "Virtual Host",
         'ip':    "IP Address",
@@ -180,7 +195,7 @@ class Recorder(Base):
     def _oops(self, failure):
         failure.raiseException()
 
-    def _saveRecords(self, records):
+    def _saveRecords(self, rk):
         """
         Callback to save records returned from my reader
         """
@@ -198,6 +213,14 @@ class Recorder(Base):
             row = makeRow(x)
             csvWriter.writerow(rowBase + row)
 
+        # Save the IP addresses if that option set
+        if self.opt['i']:
+            fh = open(self.opt['i'], 'w')
+            for ip in sorted(rk.ipList):
+                fh.write(ip + '\n')
+            fh.close()
+        # Now the actual records
+        records = rk.records
         printRecords = self.opt['p']
         keys = sorted(records.keys())
         cfh = open(self.csvFilePath, 'wb')

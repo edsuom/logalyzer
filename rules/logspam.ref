@@ -1,0 +1,13 @@
+# Case-sensitive regular expressions for referrers indicating the client
+# wasn't human
+
+# Notorious log spammer
+\Wsemalt
+buttons\-for\-website
+
+# Also seen
+make\-money
+
+# Seems like scum, but do I really want to block them?
+#sitedossier
+#crawler

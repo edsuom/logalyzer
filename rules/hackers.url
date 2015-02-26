@@ -16,6 +16,7 @@
 # Anyone who attempts to access URLs matching these should be summarily blocked
 #------------------------------------------------------------------------------
 fckeditor
+wp\-admin/
 /[\w\-]+\.php
 /tiny_mce/
 /etc/passwd
@@ -30,6 +31,5 @@ logitec\.se
 jquery
 blogger\.com
 /mb-rip
-
-
-
+/cgi[\-/]
+DOCUMENT_ROOT
