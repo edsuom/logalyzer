@@ -459,7 +459,9 @@ class TestCase(unittest.TestCase):
 
     def assertNone(self, obj, msg=""):
         if obj is not None:
-            self.fail(msg)
+            if msg:
+                msg = "\n" + msg
+            self.fail("Expected <None>, got '{}'{}".str(obj, msg))
 
     def assertNotNone(self, obj, msg=""):
         if obj is None:

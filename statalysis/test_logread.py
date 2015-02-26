@@ -25,18 +25,14 @@ class TestRecordKeeper(tb.TestCase):
         self.rk = logread.RecordKeeper()
 
     def test_isRedirect(self):
-        flag, vhost = self.rk.isRedirect("foo.com", ip1, 200)
-        self.assertFalse(flag)
+        vhost = self.rk.isRedirect("foo.com", ip1, 200)
         self.assertEqual(vhost, "foo.com")
-        flag, vhost = self.rk.isRedirect("foo.com", ip2, 302)
-        self.assertFalse(flag)
+        vhost = self.rk.isRedirect("foo.com", ip2, 302)
         self.assertEqual(vhost, "foo.com")
         for k in xrange(10):
-            flag, vhost = self.rk.isRedirect("bar.com", ip2, 200)
-            self.assertTrue(flag)
+            vhost = self.rk.isRedirect("bar.com", ip2, 200)
             self.assertEqual(vhost, "foo.com")
-        flag, vhost = self.rk.isRedirect("bar.com", ip1, 200)
-        self.assertFalse(flag)
+        vhost = self.rk.isRedirect("bar.com", ip1, 200)
         self.assertEqual(vhost, "bar.com")
         
 
@@ -101,9 +97,9 @@ class TestParser(tb.TestCase):
                 (200, False), (301, False), (400, True), (404, True)):
             result = mr(code, "-", "-")
             if expectReject:
-                self.assertNone(result)
+                self.assertNone(result, code)
             else:
-                self.assertNotNone(result)
+                self.assertNotNone(result, code)
         self.p.exclude = []
         for code in (200, 301, 400, 404):
             self.assertNotNone(mr(code, "-", "-"))

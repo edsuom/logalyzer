@@ -104,7 +104,7 @@ class IPMatcher(MatcherBase):
         thisLong = thisNet.network_long()
         if thisLong in self.netLongs:
             # Same long network address, so do more thorough check
-            for otherNet in self.networks:
+            for otherNet, null in self.networks:
                 if thisNet.check_collision(otherNet):
                     # Yep, redundant rule
                     break
@@ -112,11 +112,11 @@ class IPMatcher(MatcherBase):
                 # No collision, so actually NOT a redundant rule;
                 # add it. (Will this ever happen with properly
                 # defined rules?)
-                self.networks.append(thisNet)
+                self.networks.append([thisNet, 0])
         else:
             # New long network address, add both it and the network object
             self.netLongs.append(thisLong)
-            self.networks.append(thisNet)
+            self.networks.append([thisNet, 0])
 
     def addOffender(self, ip):
         """
@@ -142,12 +142,18 @@ class IPMatcher(MatcherBase):
         ipLong = long(ipObject)
         if ipLong in self.ipLongs:
             return True
-        # Not found (yet), go through the actual list of networks
-        for net in self.networks:
-            if net.has_key(ipObject):
+        # Not found (yet), go through the actual list of networks. If
+        # a hit is found, the count for that network is increased and
+        # the list is resorted by number of hits,
+        # descending. Hopefully this will result in more efficient
+        # operation as the more notorious networks get found first.
+        for netAndCount in self.networks:
+            if netAndCount[0].has_key(ipObject):
                 # Offender found
                 self.setCache(0, ip)
                 self.ipLongs.append(ipLong)
+                netAndCount[1] += 1
+                self.networks.sort(key=lambda x: x[1], reverse=True)
                 return True
         self.setCache(1, ip)
         return False

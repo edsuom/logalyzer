@@ -56,9 +56,8 @@ records from IP addresses with bot behavior will be purged.
 --omit
 Omit the user-agent string from the records
 
--s, --shelve file
-File in which to save a Python shelf of the records (the CSV file is
-still written)
+-s, --secondary
+Ignore secondary files (css and images)
 
 -i, --ip file
 File in which to save a list of the (unique) purged IP addresses.
@@ -174,6 +173,7 @@ class Recorder(Base):
             self.myDir, rules,
             vhost=self.opt['vhost'],
             exclude=exclude, noUA=self.opt['omit'],
+            ignoreSecondary=opt['s'],
             verbose=self.verbose)
 
     def _oops(self, failure):

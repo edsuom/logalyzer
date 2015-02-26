@@ -38,8 +38,7 @@ class RecordKeeper(object):
         Checks if this vhost is the destination of a redirect from another
         one, and replace it with the old one if so.
         """
-        flag = False
-        if code >= 300 and code < 400:
+        if code in [301, 302]:
             # This is a redirect, so save my vhost for the inevitable
             # check from the same IP address
             self.redirects[ip] = vhost
@@ -47,7 +46,6 @@ class RecordKeeper(object):
             oldVhost = self.redirects.pop(ip, None)
             if oldVhost:
                 # There was a former vhost: This is a redirect.
-                flag = True
                 # While we set the substitute vhost, put a replacement
                 # entry back in the FIFO to ensure we can find it
                 # again if checked again soon
@@ -55,7 +53,7 @@ class RecordKeeper(object):
         # Remove oldest entry until FIFO no longer too big
         while len(self.redirects) > self.N_redirects:
             self.redirects.popitem(last=False)
-        return flag, vhost
+        return vhost
 
     def purgeIP(self, ip):
         """
@@ -182,6 +180,8 @@ class Parser(Base):
             rdb(":", 4, 2, 2, 2)
         )
 
+    reSecondary = re.compile(r'\.(jpg|jpeg|png|gif|css|ico)$')
+
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -191,7 +191,10 @@ class Parser(Base):
         ('botMatcher', 'BotMatcher'))
 
     def __init__(
-            self, matchers, vhost=None, exclude=[], noUA=False, verbose=False):
+            self, matchers,
+            vhost=None, exclude=[], noUA=False,
+            ignoreSecondary=False,
+            verbose=False):
         #----------------------------------------------------------------------
         for callableName, matcherName in self.matcherTable:
             if matcherName in matchers:
@@ -200,6 +203,7 @@ class Parser(Base):
         self.vhost = vhost
         self.exclude = exclude
         self.noUA = noUA
+        self.ignoreSecondary = ignoreSecondary
         self.verbose = verbose
 
     def ipMatcher(self, ip):
@@ -291,14 +295,20 @@ class Parser(Base):
         was the original vhost before a redirect. In that case the
         redirect-destination vhost isn't used.
 
+        If my ignoreSecondary attribute is set and this is a secondary
+        file (css or image), it is ignored with no further checks.
+
         If one or more HTTP codes are supplied in my exclude
         attribute, then lines with those codes will be ignored.
+
         """
         stuff = line if alreadyParsed else self.parseLine(line)
         if stuff is None:
             # Bogus line
             return
         vhost, ip, dt, url, code, ref, ua = stuff
+        if self.ignoreSecondary and self.reSecondary.search(url):
+            return
         if ip in self.rk.ipList:
             # Check first for purged IP
             return
@@ -314,20 +324,21 @@ class Parser(Base):
             self.msg(line)
             self.rk.purgeIP(ip)
             return
+        # OK, this is an approved record ... unless the vhost is
+        # excluded, and unless there is an IP address match
+        record = {
+            'vhost': vhost, 'ip': ip, 'url': url, 'code': code, 'ref': ref}
+        oldVhost = self.rk.isRedirect(vhost, ip, code)
+        if oldVhost != vhost:
+            record['vhost'] = oldVhost + "*"
+        if self.vhost and oldVhost != self.vhost:
+            # Excluded vhost
+            return
         # The last and most time-consuming check is for the IP address
         # itself. Only done if this isn't an IP address purged for
         # bot-type behavior, an excluded vhost or code, or a matching
         # User-Agent string.
         if self.ipMatcher(ip):
-            return
-        # OK, this is an approved record ... unless the vhost is excluded
-        record = {
-            'vhost': vhost, 'ip': ip, 'url': url, 'code': code, 'ref': ref}
-        flag, vhost = self.rk.isRedirect(vhost, ip, code)
-        if flag:
-            record['vhost'] = vhost + "*"
-        if self.vhost and vhost != self.vhost:
-            # Excluded vhost
             return
         # Finally, add the user-agent to the record unless omitted
         if self.noUA is False:
@@ -356,7 +367,9 @@ class Reader(Base):
 
     def __init__(
             self, logDir, rules={},
-            vhost=None, exclude=[], noUA=False, verbose=False):
+            vhost=None, exclude=[], noUA=False,
+            ignoreSecondary=ignoreSecondary,
+            verbose=False):
         #----------------------------------------------------------------------
         self.myDir = logDir
         self.rk = RecordKeeper()
@@ -364,7 +377,8 @@ class Reader(Base):
         for matcherName, ruleList in rules.iteritems():
             thisMatcher = getattr(sift, matcherName)(ruleList)
             matchers[matcherName] = thisMatcher
-        parser = Parser(matchers, vhost, exclude, noUA, verbose)
+        parser = Parser(
+            matchers, vhost, exclude, noUA, ignoreSecondary, verbose)
         #self.q = BogusQueue(parser=parser)
         self.q = ProcessQueue(self.cores, parser=parser)
         if verbose:

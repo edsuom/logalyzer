@@ -30,7 +30,7 @@ class TestIPMatcher(tb.TestCase):
             thisNet = ipcalc.Network(ipString)
             self.assertIn(
                 thisNet.host_first(),
-                [x.host_first() for x in self.ip.networks])
+                [x[0].host_first() for x in self.ip.networks])
 
     def test_someMatches(self):
         cases = (
