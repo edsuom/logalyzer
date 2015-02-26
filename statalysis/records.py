@@ -95,6 +95,7 @@ class RuleReader(Base):
                 continue
             self.msg("| {}", line)
             yield line
+        self.msg("")
         fh.close()
         
     def rules(self, extension, csvList):
@@ -173,7 +174,7 @@ class Recorder(Base):
             self.myDir, rules,
             vhost=self.opt['vhost'],
             exclude=exclude, noUA=self.opt['omit'],
-            ignoreSecondary=opt['s'],
+            ignoreSecondary=self.opt['s'],
             verbose=self.verbose)
 
     def _oops(self, failure):
