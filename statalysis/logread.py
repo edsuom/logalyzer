@@ -368,7 +368,7 @@ class Reader(Base):
     def __init__(
             self, logDir, rules={},
             vhost=None, exclude=[], noUA=False,
-            ignoreSecondary=ignoreSecondary,
+            ignoreSecondary=False,
             verbose=False):
         #----------------------------------------------------------------------
         self.myDir = logDir
