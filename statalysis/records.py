@@ -126,6 +126,11 @@ class RuleReader(Base):
 class Recorder(Base):
     """
     I load records from a Reader and save them in a CSV file
+
+    Look through it with
+
+    less -x5,8,12,16,21,52,69,75,100,200 -S <file.csv>
+
     """
     csvDelimiter = '\t'
     

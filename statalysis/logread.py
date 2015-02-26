@@ -259,12 +259,10 @@ class Parser(Base):
         if match:
             dt = self.dtFactory(*match.groups()[:6])
             if match.group(7) == '-':
-                self.msg(match.group(8))
                 return
             line = match.group(8)
         match = self.reCLF.match(line)
         if match is None:
-            self.msg(line)
             return
         result = list(match.group(2, 1))
         if dt is None:
@@ -313,25 +311,23 @@ class Parser(Base):
             # Excluded UA string
             return
         if self.botMatcher(url):
+            self.msg(line)
             self.rk.purgeIP(ip)
-            return
-        # Start building a record, which will get tossed if vhost or
-        # IP exclusion
-        record = {
-            'vhost': vhost, 'ip': ip, 'url': url, 'code': code, 'ref': ref}
-        # Doing the vhost check requires redirect processing, even if
-        # record is to be tossed
-        flag, vhost = self.rk.isRedirect(vhost, ip, code)
-        if flag:
-            record['vhost'] = vhost + "*"
-        if self.vhost and vhost != self.vhost:
-            # Excluded vhost
             return
         # The last and most time-consuming check is for the IP address
         # itself. Only done if this isn't an IP address purged for
         # bot-type behavior, an excluded vhost or code, or a matching
         # User-Agent string.
         if self.ipMatcher(ip):
+            return
+        # OK, this is an approved record ... unless the vhost is excluded
+        record = {
+            'vhost': vhost, 'ip': ip, 'url': url, 'code': code, 'ref': ref}
+        flag, vhost = self.rk.isRedirect(vhost, ip, code)
+        if flag:
+            record['vhost'] = vhost + "*"
+        if self.vhost and vhost != self.vhost:
+            # Excluded vhost
             return
         # Finally, add the user-agent to the record unless omitted
         if self.noUA is False:
