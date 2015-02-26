@@ -193,6 +193,7 @@ class Parser(Base):
 
     matcherTable = (
         ('ipMatcher',  'IPMatcher'),
+        ('netMatcher', 'NetMatcher'),
         ('uaMatcher',  'UAMatcher'),
         ('botMatcher', 'BotMatcher'),
         ('refMatcher', 'RefMatcher'))
@@ -219,19 +220,25 @@ class Parser(Base):
         """
         return False
 
+    def netMatcher(self, ip):
+        """
+        Never matches any IP address if no netMatcher supplied.
+        """
+        return False
+
     def uaMatcher(self, ip, uaString):
         """
         Never matches any UA string if no uaMatcher supplied.
         """
         return False
 
-    def botMatcher(self, url):
+    def botMatcher(self, ip, url):
         """
         Never matches any url if no botMatcher supplied.
         """
         return False
 
-    def refMatcher(self, url):
+    def refMatcher(self, ip, url):
         """
         Never matches any referrer string if no refMatcher supplied.
         """
@@ -320,15 +327,16 @@ class Parser(Base):
             # Bogus line
             return
         vhost, ip, dt, url, code, ref, ua = stuff
-        if self.ignoreSecondary and self.reSecondary.search(url):
+        # First and fastest of all is checking for known bad guys
+        if ip in self.rk.ipList or self.ipMatcher(ip):
             return
-        if ip in self.rk.ipList:
-            # Check first for purged IP
+        # Now check for secondary file, if we are ignored those
+        if self.ignoreSecondary and self.reSecondary.search(url):
             return
         # Then do some relatively easy exclusion checks, starting with
         # botMatcher and refMatcher so we can harvest the most bot IP
         # addresses (useful if -i option set)
-        if self.botMatcher(url) or self.refMatcher(ref):
+        if self.botMatcher(ip, url) or self.refMatcher(ip, ref):
             if self.rk.purgeIP(ip):
                 self.msg(line)
             return
@@ -349,11 +357,9 @@ class Parser(Base):
         if self.vhost and oldVhost != self.vhost:
             # Excluded vhost
             return
-        # The last and most time-consuming check is for the IP address
-        # itself. Only done if this isn't an IP address purged for
-        # bot-type behavior, an excluded vhost or code, or a matching
-        # User-Agent string.
-        if self.ipMatcher(ip):
+        # The last and most time-consuming check is for excluded
+        # networks. Only done if all other checks have passed.
+        if self.netMatcher(ip):
             return
         # Finally, add the user-agent to the record unless omitted
         if self.noUA is False:

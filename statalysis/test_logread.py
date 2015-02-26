@@ -84,7 +84,7 @@ class TestParser(tb.TestCase):
         def uaMatcher(ip, ua):
             return ua.endswith('bot')
 
-        def botMatcher(url):
+        def botMatcher(ip, url):
             if ".php" in url:
                 return True
             return False
@@ -151,7 +151,7 @@ class TestReader(tb.TestCase):
             else:
                 rk = result
                 self.assertIsInstance(rk.ipList, list)
-                self.assertTrue(len(rk.ipList) > 5)
+                self.assertTrue(len(rk.ipList) > 1)
                 self.assertIsInstance(rk.records, dict)
                 self.assertTrue(len(rk.records) > 100)
         

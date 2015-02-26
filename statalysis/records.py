@@ -11,8 +11,14 @@ SYNOPSIS
 sa [--vhost somehost.com]
    [-p] [-e, --exclude code1,code2,...]
    [-d, --ruledir <directory of rule files>]
-     [-r, --rules rule1,rule2,...]
-     [-u, --ua <file
+     [-i, --ip  [xX]|rule1,rule2,...]
+     [-n, --net [xX]|rule1,rule2,...]
+     [-u, --ua  [xX]|rule1,rule2,...]
+     [-b, --bot [xX]|rule1,rule2,...]
+     [-r, --ref [xX]|rule1,rule2,...]
+   [--omit] [-y, --secondary]
+   [-s, --save <file to save purged IPs>]
+   [-v, --verbose]
 outFile
 
 
@@ -20,6 +26,11 @@ DESCRIPTION
 
 Analyzes log files in the directory where outFile is to go, producing
 outFile in CSV format.
+
+Specify particular ip, net, ua, bot, or ref rules in the rules
+directory with a comma-separated list after the -i, -n, -u, -b, or -r
+option. Use x or X to skip all such rules. Omit the option to use all
+pertinent rules in the rules directory.
 
 All records from IP addresses with bot behavior will be purged.
 
@@ -42,36 +53,33 @@ Exclude HTTP code(s) (comma separated list, no spaces)
 Directory for .net, .ua, and .url file(s) containing IP, user-agent,
 and url exclusion rules
 
+-i, --ip rules
+Rules corresponding to .ip files in ruledir containing IP addresses
+aaa.bbb.ccc.ddd notation.
+
 -n, --net rules
 Rules corresponding to .net files in ruledir containing IP network
-exclusion rules in aaa.bbb.ccc.ddd/ee notation. Use x or X to skip all
-such rules are used; otherwise all in the directory will be used.
+exclusion rules in aaa.bbb.ccc.ddd/ee notation.
 
 -u, --ua rules
 Rules corresponding to .ua files containing regular expressions (case
-sensitive) that match User-Agent strings to exclude. Use x or X to
-skip all such rules are used; otherwise all in the directory will be
-used.
+sensitive) that match User-Agent strings to exclude.
 
--b, --url rules
+-b, --bot rules
 Rules corresponding to .url files containing regular expressions (case
-sensitive) that match url strings indicating a malicious bot. Use x or
-X to skip all such rules are used; otherwise all in the directory will
-be used.
+sensitive) that match url strings indicating a malicious bot.
 
 -r, --referrer rules
 Rules corresponding to .ref files containing regular expressions (case
-sensitive) that match referrer strings indicating a malicious bot. Use
-x or X to skip all such rules are used; otherwise all in the directory
-will be used.
+sensitive) that match referrer strings indicating a malicious bot.
 
 --omit
 Omit the user-agent string from the records
 
--s, --secondary
-Ignore secondary files (css and images)
+-y, --secondary
+Ignore secondary files (css, webfonts, images)
 
--i, --ip file
+-s, --save file
 File in which to save a list of the (unique) purged IP addresses.
 
 -v, --verbose
@@ -149,7 +157,8 @@ class Recorder(Base):
     csvDelimiter = '\t'
     
     ruleTable = (
-        ('n', "net", "IPMatcher"),
+        ('i', "ip",  "IPMatcher"),
+        ('n', "net", "NetMatcher"),
         ('u', "ua",  "UAMatcher"),
         ('b', "url", "BotMatcher"),
         ('r', "ref", "RefMatcher"))
@@ -180,7 +189,7 @@ class Recorder(Base):
         self.msg("Loading rules from '{}'", rulesDir, '-')
         self.msg("Exclusions:")
         exclude = self.csvTextToList(self.opt['e'], int)
-        self.msg("| HTTP Codes: {}", ", ".join(exclude))
+        self.msg("| HTTP Codes: {}", ", ".join([str(x) for x in exclude]))
         rules = {}
         rr = RuleReader(rulesDir, self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
@@ -189,7 +198,7 @@ class Recorder(Base):
             self.myDir, rules,
             vhost=self.opt['vhost'],
             exclude=exclude, noUA=self.opt['omit'],
-            ignoreSecondary=self.opt['s'],
+            ignoreSecondary=self.opt['y'],
             verbose=self.verbose)
 
     def _oops(self, failure):

@@ -18,7 +18,12 @@ class MatcherBase(object):
     Build your matcher on me
     """
     def __init__(self, rules):
-        self.startup(rules)
+        clean = []
+        for rule in rules:
+            rule = rule.strip()
+            if rule:
+                clean.append(rule)
+        self.startup(clean)
 
     def reFromRules(self, rules):
         reParts = []
@@ -74,7 +79,42 @@ class MatcherBase(object):
 
 class IPMatcher(MatcherBase):
     """
-    I efficiently match IP addresses with rules
+    I efficiently match IP addresses to individual known
+    offenders. Simple and fast, no caching.
+    """
+    def startup(self, rules):
+        # Lookup table for hashed ip strings
+        self.ipHashes = array.array('L')
+        for ip in rules:
+            self.addOffender(ip)
+
+    def dqToHash(self, ip):
+        """
+        Fast dotted-quad to guaranteed-unique long int hash, adapted from
+        ipcalc.IP. This is NOT the actual long int value of the ip,
+        because we don't bother reversing the order of the four dotted
+        elements.
+        """
+        return sum(
+            long(byte) << 8 * index
+            for index, byte in enumerate(ip.split('.')))
+            
+    def addOffender(self, ip):
+        """
+        Call this with an IP address (string format) to add it to my list
+        of offenders. As a bonus, returns the ip address in long 
+        """
+        ipHash = self.dqToHash(ip)
+        if ipHash not in self.ipHashes:
+            self.ipHashes.append(ipHash)
+
+    def __call__(self, ip):
+        return self.dqToHash(ip) in self.ipHashes
+
+
+class NetMatcher(MatcherBase):
+    """
+    I efficiently match IP addresses to IP networks with rules
     """
     reRule = re.compile(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/[123]{0,1}[0-9])')
     
@@ -86,8 +126,6 @@ class IPMatcher(MatcherBase):
         self.newCache()
         # LongInt lookup table for making it faster to add rules.
         self.netLongs = array.array('L')
-        # LongInt lookup table for known and added offenders
-        self.ipLongs = array.array('L')
         # Add the rules
         for rule in rules:
             self.addRule(rule)
@@ -117,16 +155,6 @@ class IPMatcher(MatcherBase):
             # New long network address, add both it and the network object
             self.netLongs.append(thisLong)
             self.networks.append([thisNet, 0])
-
-    def addOffender(self, ip):
-        """
-        Call this with an IP address (string format) to add it to my list
-        of offenders.
-        """
-        ipLong = long(ipcalc.IP(ip))
-        if ipLong not in self.ipLongs:
-            self.ipLongs.append(ipLong)
-            self.clearCache(ip)
     
     def __call__(self, ip):
         # Likely to be several sequential hits from offenders and
@@ -138,20 +166,15 @@ class IPMatcher(MatcherBase):
             # Innocent was cached
             return False
         ipObject = ipcalc.IP(ip)
-        # Check for known and added offenders
-        ipLong = long(ipObject)
-        if ipLong in self.ipLongs:
-            return True
         # Not found (yet), go through the actual list of networks. If
         # a hit is found, the count for that network is increased and
-        # the list is resorted by number of hits,
-        # descending. Hopefully this will result in more efficient
-        # operation as the more notorious networks get found first.
+        # the list is resorted by number of hits, descending. This
+        # results in more efficient operation as the more notorious
+        # networks get found first.
         for netAndCount in self.networks:
             if netAndCount[0].has_key(ipObject):
                 # Offender found
                 self.setCache(0, ip)
-                self.ipLongs.append(ipLong)
                 netAndCount[1] += 1
                 self.networks.sort(key=lambda x: x[1], reverse=True)
                 return True
@@ -159,18 +182,18 @@ class IPMatcher(MatcherBase):
         return False
 
 
-class UAMatcher(MatcherBase):
+class ReMatcherBase(MatcherBase):
     """
-    I efficiently match User Agent strings with regular expressions
+    I efficiently match strings with regular expressions
     """
     def startup(self, rules):
         # Cache for Offenders
         self.newCache()
         # Cache for innocents
         self.newCache()
-        self.reUA = self.reFromRules(rules)
+        self.re = self.reFromRules(rules)
     
-    def __call__(self, ip, uaString):
+    def __call__(self, ip, string):
         # Likely to be several sequential hits from offenders and
         # innocents alike
         if self.checkCache(0, ip):
@@ -179,7 +202,7 @@ class UAMatcher(MatcherBase):
         if self.checkCache(1, ip):
             # Innocent was cached
             return False
-        if self.reUA.search(uaString):
+        if self.re.search(string):
             # Offender found
             self.setCache(0, ip)
             return True
@@ -187,17 +210,23 @@ class UAMatcher(MatcherBase):
         return False
 
 
-class BotMatcher(MatcherBase):
-    def startup(self, rules):
-        self.reURL = self.reFromRules(rules)
-    
-    def __call__(self, url):
-        return bool(self.reURL.search(url))
+class UAMatcher(ReMatcherBase):
+    """
+    I use parsed .ua rules to efficiently check for user-agents that
+    are undesirable in logs, though they shouldn't be blocked.
+    """
 
 
-class RefMatcher(MatcherBase):
-    def startup(self, rules):
-        self.reReferrer = self.reFromRules(rules)
-    
-    def __call__(self, ref):
-        return bool(self.reReferrer.search(ref))
+class BotMatcher(ReMatcherBase):
+    """
+    I use parsed .url rules to efficiently check for bots that are
+    seen in logs doing hacker-type things, and should get blocked.
+    """
+
+
+class RefMatcher(ReMatcherBase):
+    """
+    I use parsed .ref rules to efficiently check for referrers that
+    are clearly logspammer, and should get blocked.
+    """
+
