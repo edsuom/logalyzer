@@ -87,6 +87,9 @@ class IPMatcher(MatcherBase):
         self.ipHashes = array.array('L')
         for ip in rules:
             self.addOffender(ip)
+        # Prep for binary searches
+        self.N = len(self.ipHashes)
+        self.ipHashes = sorted(self.ipHashes)
 
     def dqToHash(self, ip):
         """
@@ -108,8 +111,26 @@ class IPMatcher(MatcherBase):
         if ipHash not in self.ipHashes:
             self.ipHashes.append(ipHash)
 
+    def hasHash(self, ipHash):
+        """
+        Binary search, adapted from
+        http://code.activestate.com/recipes/81188/
+        """
+        kMin = 0
+        kMax = self.N - 1
+        while True:
+            if kMax < kMin:
+                return False
+            k = (kMin  + kMax) // 2
+            if self.ipHashes[k] < ipHash:
+                kMin = k + 1
+            elif self.ipHashes[k] > ipHash:
+                kMax = k - 1
+            else:
+                return True
+            
     def __call__(self, ip):
-        return self.dqToHash(ip) in self.ipHashes
+        return self.hasHash(self.dqToHash(ip))
 
 
 class NetMatcher(MatcherBase):
