@@ -132,13 +132,13 @@ class Recorder(Base):
     ruleTable = (
         ('n', "net", "IPMatcher"),
         ('u', "ua", "UAMatcher"),
-        ('b', "url", "botMatcher"))
+        ('b', "url", "BotMatcher"))
 
     headings = {
         'vhost': "Virtual Host",
         'ip':    "IP Address",
-        'url':   "URL Requested",
         'code':  "HTTP",
+        'url':   "URL Requested",
         'ref':   "Referrer",
         'ua':    "User Agent",
         }
@@ -159,15 +159,17 @@ class Recorder(Base):
             rulesDir = self.myDir
         self.msg("Loading rules from '{}'", rulesDir, '-')
         self.msg("Exclusions:")
-        exclude = self.cvsTextToList(self.opt['e'], int)
+        exclude = self.csvTextToList(self.opt['e'], int)
         self.msg("| HTTP Codes: {}", ", ".join(exclude))
         rules = {}
         rr = RuleReader(rulesDir, self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
-            rules[matcherName] = rr(extension, self.opt[optKey])
+            rules[matcherName] = rr.rules(extension, self.opt[optKey])
         return logread.Reader(
             self.myDir, rules,
-            exclude=exclude, noUA=self.opt['omit'], verbose=self.verbose)
+            vhost=self.opt['vhost'],
+            exclude=exclude, noUA=self.opt['omit'],
+            verbose=self.verbose)
 
     def _oops(self, failure):
         failure.raiseException()
@@ -180,7 +182,7 @@ class Recorder(Base):
             row = []
             if 'vhost' in fields:
                 row.append(x['vhost'])
-            for field in ('ip', 'url', 'code', 'ref'):
+            for field in ('ip', 'code', 'url', 'ref'):
                 row.append(x[field])
             if 'ua' in fields:
                 row.append(x['ua'])
@@ -189,7 +191,7 @@ class Recorder(Base):
         def writeRow(x):
             row = makeRow(x)
             csvWriter.writerow(rowBase + row)
-        
+
         printRecords = self.opt['p']
         keys = sorted(records.keys())
         cfh = open(self.csvFilePath, 'wb')
@@ -211,14 +213,14 @@ class Recorder(Base):
                 writeRow(thisRecord)
         cfh.close()
     
-    def load(self, vhost):
-        d = self.reader.run(vhost).addCallbacks(self._saveRecords, self._oops)
+    def load(self):
+        d = self.reader.run().addCallbacks(self._saveRecords, self._oops)
         d.addCallbacks(lambda _ : reactor.stop(), self._oops)
         return d
 
     def run(self):
         self.reader = self.readerFactory()
-        reactor.callWhenRunning(self.load, self.opt['vhost'])
+        reactor.callWhenRunning(self.load)
         reactor.run()
 
 

@@ -457,6 +457,14 @@ class TestCase(unittest.TestCase):
     def runerator(self, executable, *args, **kw):
         return Runerator(self, executable, *args, **kw)
 
+    def assertNone(self, obj, msg=""):
+        if obj is not None:
+            self.fail(msg)
+
+    def assertNotNone(self, obj, msg=""):
+        if obj is None:
+            self.fail(msg)
+            
     def assertPattern(self, pattern, text):
         proto = "Pattern '{}' not in '{}'"
         if '\n' not in pattern:

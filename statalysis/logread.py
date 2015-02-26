@@ -9,6 +9,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 import re, gzip
 from datetime import datetime
+from collections import OrderedDict
 
 from twisted.internet import defer, reactor
 
@@ -22,6 +23,7 @@ class RecordKeeper(object):
     """
     I keep timestamp-keyed log records.
     """
+    N_redirects = 50
     secondsInDay = 24 * 60 * 60
     secondsInHour = 60 * 60
 
@@ -29,6 +31,31 @@ class RecordKeeper(object):
         self.ipList = []
         self.records = {}
         self.newKeys = []
+        self.redirects = OrderedDict()
+        
+    def isRedirect(self, vhost, ip, code):
+        """
+        Checks if this vhost is the destination of a redirect from another
+        one, and replace it with the old one if so.
+        """
+        flag = False
+        if code >= 300 and code < 400:
+            # This is a redirect, so save my vhost for the inevitable
+            # check from the same IP address
+            self.redirects[ip] = vhost
+        else:
+            oldVhost = self.redirects.pop(ip, None)
+            if oldVhost:
+                # There was a former vhost: This is a redirect.
+                flag = True
+                # While we set the substitute vhost, put a replacement
+                # entry back in the FIFO to ensure we can find it
+                # again if checked again soon
+                vhost = self.redirects[ip] = oldVhost
+        # Remove oldest entry until FIFO no longer too big
+        while len(self.redirects) > self.N_redirects:
+            self.redirects.popitem(last=False)
+        return flag, vhost
 
     def purgeIP(self, ip):
         """
@@ -163,11 +190,14 @@ class Parser(Base):
         ('uaMatcher', 'UAMatcher'),
         ('botMatcher', 'BotMatcher'))
 
-    def __init__(self, matchers, exclude=[], noUA=False, verbose=False):
+    def __init__(
+            self, matchers, vhost=None, exclude=[], noUA=False, verbose=False):
+        #----------------------------------------------------------------------
         for callableName, matcherName in self.matcherTable:
             if matcherName in matchers:
-                setattr(self, callableName, matcherName)
+                setattr(self, callableName, matchers[matcherName])
         self.rk = RecordKeeper()
+        self.vhost = vhost
         self.exclude = exclude
         self.noUA = noUA
         self.verbose = verbose
@@ -243,13 +273,13 @@ class Parser(Base):
         result.extend(match.group(8, 9))
         return result
 
-    def makeRecord(self, line, vhost=None):
+    def makeRecord(self, line, alreadyParsed=False):
         """
         Supply a mess of logfile lines and this method will iterate over
         the parsed results for the specified vhost (or all vhosts, if
-        none specified) to generate a datetime object and dict for
-        each valid line. The dict contains at least the following
-        entries:
+        none was specified in my constructor) to generate a datetime
+        object and dict for each valid line. The dict contains at
+        least the following entries:
 
         ip:     Requestor IP address
         url:    Requested url
@@ -259,28 +289,22 @@ class Parser(Base):
         Unless my noUA attribute is set True, it will also include ua:
         The requestor's User-Agent string.
 
-        If no vhost is specified, the dict will also include a vhost
-        entry.
+        The dict's vhost entry will have an asterix ("*") after it if
+        was the original vhost before a redirect. In that case the
+        redirect-destination vhost isn't used.
 
         If one or more HTTP codes are supplied in my exclude
         attribute, then lines with those codes will be ignored.
         """
-        stuff = self.parseLine(line)
+        stuff = line if alreadyParsed else self.parseLine(line)
         if stuff is None:
             # Bogus line
             return
-        thisVhost, ip, dt, url, code, ref, ua = stuff
+        vhost, ip, dt, url, code, ref, ua = stuff
         if ip in self.rk.ipList:
-            # Check right away for purged IP
+            # Check first for purged IP
             return
-        record = {'ip': ip, 'url': url, 'code': code, 'ref': ref}
-        if vhost is None:
-            record['vhost'] = thisVhost
-        elif thisVhost != vhost:
-            # Excluded vhost
-            return
-        if self.noUA is False:
-            record['ua'] = ua
+        # Then do some relatively easy exclusion checks
         if self.exclude:
             if code in self.exclude:
                 # Excluded code
@@ -291,22 +315,37 @@ class Parser(Base):
         if self.botMatcher(url):
             self.rk.purgeIP(ip)
             return
+        # Start building a record, which will get tossed if vhost or
+        # IP exclusion
+        record = {
+            'vhost': vhost, 'ip': ip, 'url': url, 'code': code, 'ref': ref}
+        # Doing the vhost check requires redirect processing, even if
+        # record is to be tossed
+        flag, vhost = self.rk.isRedirect(vhost, ip, code)
+        if flag:
+            record['vhost'] = vhost + "*"
+        if self.vhost and vhost != self.vhost:
+            # Excluded vhost
+            return
         # The last and most time-consuming check is for the IP address
         # itself. Only done if this isn't an IP address purged for
         # bot-type behavior, an excluded vhost or code, or a matching
         # User-Agent string.
         if self.ipMatcher(ip):
             return
+        # Finally, add the user-agent to the record unless omitted
+        if self.noUA is False:
+            record['ua'] = ua
         return dt, record
     
-    def __call__(self, fileName, vhost):
+    def __call__(self, fileName):
         """
         The public interface to all the parsing.
         """
         self.rk.clear()
         fh = self.file(fileName)
         for line in fh:
-            stuff = self.makeRecord(line, vhost)
+            stuff = self.makeRecord(line)
             if stuff:
                 self.rk.add(*stuff)
         fh.close()
@@ -321,7 +360,7 @@ class Reader(Base):
 
     def __init__(
             self, logDir, rules={},
-            exclude=[], noUA=False, verbose=False):
+            vhost=None, exclude=[], noUA=False, verbose=False):
         #----------------------------------------------------------------------
         self.myDir = logDir
         self.rk = RecordKeeper()
@@ -329,8 +368,8 @@ class Reader(Base):
         for matcherName, ruleList in rules.iteritems():
             thisMatcher = getattr(sift, matcherName)(ruleList)
             matchers[matcherName] = thisMatcher
-        parser = Parser(matchers, exclude, noUA, verbose)
-        #self.q = BogusQueue()
+        parser = Parser(matchers, vhost, exclude, noUA, verbose)
+        #self.q = BogusQueue(parser=parser)
         self.q = ProcessQueue(self.cores, parser=parser)
         if verbose:
             self.verbose = True
@@ -339,7 +378,7 @@ class Reader(Base):
         failure.raiseException()
         reactor.stop()
 
-    def run(self, vhost=None):
+    def run(self):
         """
         Runs everything in twisted fashion. Why? Because I'm a glutton for
         punishment.
@@ -361,7 +400,7 @@ class Reader(Base):
                 continue
             self.msg(fileName)
             d = self.q.call(
-                'parser', self.pathInDir(fileName), vhost)
+                'parser', self.pathInDir(fileName))
             d.addCallback(gotSomeResults, fileName)
             d.addErrback(self._oops)
             dList.append(d)

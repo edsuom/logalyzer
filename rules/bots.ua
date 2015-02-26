@@ -27,7 +27,8 @@ binlar
 A6-Indexer
 Google-SearchByImage
 FlipboardProxy
-
+dataminr
+Link
 
 # Potentially malicious
 Java/

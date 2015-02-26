@@ -16,13 +16,20 @@
 # Anyone who attempts to access URLs matching these should be summarily blocked
 #------------------------------------------------------------------------------
 fckeditor
-/\w+\.php
+/[\w\-]+\.php
 /tiny_mce/
 /etc/passwd
 /scripts/
 logitec\.se
 /account/
 //components/
+/backup
+/[a-z\.]+\.(zip|rar|gz)
+/cgi-sys
+/\?.+\=node
+jquery
+blogger\.com
+/mb-rip
 
 
 

@@ -50,8 +50,8 @@ class Base(object):
     
     def msg(self, proto, *args):
         if self.verbose:
-            if args[-1].startswith('-'):
-                args[-1] = "-"*70
+            if args and args[-1].startswith('-'):
+                args = list(args[:-1]) + ["-"*70]
                 proto += "\n{}"
             print proto.format(*args)
 
