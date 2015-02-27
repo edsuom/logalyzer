@@ -385,13 +385,11 @@ class Reader(Base):
     """
     I read and parse web server log files
     """
-    cores = 3 # Leave one for the main process and GUI responsiveness
-
     def __init__(
             self, logDir, rules={},
             vhost=None, exclude=[], noUA=False,
             ignoreSecondary=False,
-            verbose=False):
+            cores=None, verbose=False):
         #----------------------------------------------------------------------
         self.myDir = logDir
         self.rk = RecordKeeper()
@@ -402,7 +400,12 @@ class Reader(Base):
         parser = Parser(
             matchers, vhost, exclude, noUA, ignoreSecondary, verbose)
         #self.q = BogusQueue(parser=parser)
-        self.q = ProcessQueue(self.cores, parser=parser)
+        if cores is None:
+            import multiprocessing as mp
+            cores = mp.cpu_count() - 1
+        else:
+            cores = int(cores)
+        self.q = ProcessQueue(cores, parser=parser)
         if verbose:
             self.verbose = True
 

@@ -9,6 +9,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 import re, os, os.path
 
+
 def rdb(sep, *args):
     """
     Builds a regular expression for separated digits.
@@ -68,6 +69,10 @@ class Base(object):
         Lists names (not paths) of files in my directory
         """
         return os.listdir(self.myDir)
+
+    def checkPath(self, filePath):
+        if not os.path.isfile(filePath):
+            raise ValueError("No file '{}' found".format(filePath))
                                
     def pathInDir(self, fileName):
         """
@@ -77,7 +82,6 @@ class Base(object):
             raise ValueError(
                 "Path '{}' specified, use file name only".format(fileName))
         path = os.path.abspath(os.path.join(self.myDir, fileName))
-        if not os.path.isfile(path):
-            raise ValueError(
-                "No file '{}' in my directory".format(fileName))
+        self.checkPath(path)
         return path
+    

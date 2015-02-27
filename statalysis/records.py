@@ -19,13 +19,13 @@ sa [--vhost somehost.com]
    [--omit] [-y, --secondary]
    [-s, --save <file to save purged IPs>]
    [-v, --verbose]
-outFile
+<file>
 
 
 DESCRIPTION
 
 Analyzes log files in the directory where outFile is to go, producing
-outFile in CSV format.
+an output <file> in CSV format (except if -c option set).
 
 Specify particular ip, net, ua, bot, or ref rules in the rules
 directory with a comma-separated list after the -i, -n, -u, -b, or -r
@@ -34,9 +34,11 @@ pertinent rules in the rules directory.
 
 All records from IP addresses with bot behavior will be purged.
 
-WARNING: If any of your bot or referrer rules match innocent search
-engines, e.g., with '/robots.txt', don't use the list from -i to block
-access to your web server!
+WARNING: If any of your bot-detecting rules that purge IP addresses
+(bot, ref) match innocent search engines, e.g., with a url match to
+'/robots.txt', don't use the saved list (--save) to block access to
+your web server!
+
 
 OPTIONS
 
@@ -55,23 +57,23 @@ and url exclusion rules
 
 -i, --ip rules
 Rules corresponding to .ip files in ruledir containing IP addresses
-aaa.bbb.ccc.ddd notation.
+aaa.bbb.ccc.ddd notation
 
 -n, --net rules
 Rules corresponding to .net files in ruledir containing IP network
-exclusion rules in aaa.bbb.ccc.ddd/ee notation.
+exclusion rules in aaa.bbb.ccc.ddd/ee notation
 
 -u, --ua rules
 Rules corresponding to .ua files containing regular expressions (case
-sensitive) that match User-Agent strings to exclude.
+sensitive) that match User-Agent strings to exclude
 
 -b, --bot rules
 Rules corresponding to .url files containing regular expressions (case
-sensitive) that match url strings indicating a malicious bot.
+sensitive) that match url strings indicating a malicious bot
 
 -r, --referrer rules
 Rules corresponding to .ref files containing regular expressions (case
-sensitive) that match referrer strings indicating a malicious bot.
+sensitive) that match referrer strings indicating a malicious bot
 
 --omit
 Omit the user-agent string from the records
@@ -80,7 +82,16 @@ Omit the user-agent string from the records
 Ignore secondary files (css, webfonts, images)
 
 -s, --save file
-File in which to save a list of the (unique) purged IP addresses.
+File in which to save a list of the purged (or consolidated) IP
+addresses, in ascending numerical order with repeats omitted.
+
+-c, --consolidate
+Just consolidate IP addresses in the <file> with those in the ip rules
+(-i), saving that to the file specified with -s. Ignores logfiles and
+net, ua, bot, and ref rules, and doesn't generate any csv file
+
+--cores N
+The number of CPU cores (really, python processes) to run in parallel
 
 -v, --verbose
 Run verbosely
@@ -102,7 +113,7 @@ class RuleReader(Base):
     """
     I read rule files
     """
-    def __init__(self, rulesDir, verbose=False):
+    def __init__(self, rulesDir='rules', verbose=False):
         self.myDir = rulesDir
         self.verbose = verbose
     
@@ -117,8 +128,15 @@ class RuleReader(Base):
             yield line
         self.msg("")
         fh.close()
+
+    def lines(self, filePath):
+        """
+        Just returns a list of non-commented, non-blank lines from the
+        specified filePath
+        """
+        return list(linerator(filePath))
         
-    def rules(self, extension, csvList):
+    def rules(self, extension, text):
         """
         Supply a file extension and a comma-separated list of rules as a
         string, and I'll read the rules from the corresponding files
@@ -131,9 +149,9 @@ class RuleReader(Base):
             return "{}.{}".format(x, extension)
 
         lines = []
-        if csvList in ['x', 'X']:
-            return []
-        nameList = self.csvTextToList(csvList, addExtension)
+        if text in ['x', 'X']:
+            return lines
+        nameList = self.csvTextToList(text, addExtension)
         if not nameList:
             nameList = [
                 x for x in self.filesInDir()
@@ -143,7 +161,7 @@ class RuleReader(Base):
             for line in self.linerator(filePath):
                 lines.append(line)
         return lines
-        
+
 
 class Recorder(Base):
     """
@@ -174,36 +192,82 @@ class Recorder(Base):
     
     def __init__(self, opt):
         self.opt = opt
+        self.verbose = opt['v']
         self.csvFilePath = opt[0]
         self.myDir = self.dirOfPath(self.csvFilePath)
-        
-    def readerFactory(self):
+
+    def loadRules(self, consolidate=False):
         """
-        I generate and return a log reader with all its rules loaded per
-        your command-line options
+        Loads rules per your command-line options. If I am in consolidate
+        mode, just returns a list of the ip addresses from the
+        selected ip rules. Otherwise returns a dict of sifters loaded
+        with all the selected rules.
         """
-        self.verbose = self.opt['v']
         rulesDir = self.opt['d']
         if rulesDir is None:
             rulesDir = self.myDir
         self.msg("Loading rules from '{}'", rulesDir, '-')
-        self.msg("Exclusions:")
-        exclude = self.csvTextToList(self.opt['e'], int)
-        self.msg("| HTTP Codes: {}", ", ".join([str(x) for x in exclude]))
         rules = {}
         rr = RuleReader(rulesDir, self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
-            rules[matcherName] = rr.rules(extension, self.opt[optKey])
+            theseRules = rr.rules(extension, self.opt[optKey])
+            rules[matcherName] = theseRules
+            if consolidate and extension == 'ip':
+                # All we do in consolidate mode is read the ip
+                # rules.
+                return theseRules
+        return rules
+        
+    def readerFactory(self):
+        """
+        I generate and return a log reader with all its rules loaded 
+        """
+        rules = self.loadRules()
+        self.msg("Exclusions", '-')
+        exclude = self.csvTextToList(self.opt['e'], int)
+        self.msg("| HTTP Codes: {}", ", ".join([str(x) for x in exclude]))
         return logread.Reader(
             self.myDir, rules,
             vhost=self.opt['vhost'],
             exclude=exclude, noUA=self.opt['omit'],
             ignoreSecondary=self.opt['y'],
+            cores=self.opt['cores'],
             verbose=self.verbose)
 
+    def ipToLong(self, ip):
+        """
+        Converts a dotted-quad IP address string to a long int. Adapted
+        from ipcalc.IP
+        """
+        q = ip.split('.')
+        q.reverse()
+        if len(q) > 4:
+            raise ValueError(
+                '%s: IPv4 address invalid: more than 4 bytes' % dq)
+        for x in q:
+            if not 0 <= int(x) <= 255:
+                raise ValueError(
+                    '%s: IPv4 address has invalid byte value' % dq)
+        while len(q) < 4:
+            q.insert(1, '0')
+        return sum(long(byte) << 8 * index for index, byte in enumerate(q))
+    
+    def writeIPs(self, filePath, ipList):
+        """
+        Writes the supplied list of ip addresses, in numerical order and
+        with no repeats, to the specified filePath.
+        """
+        ipLast = None
+        fh = open(filePath, 'w')
+        for ip in sorted(ipList, key=self.ipToLong):
+            if ip != ipLast:
+                fh.write(ip + '\n')
+                ipLast = ip
+        fh.close()
+    
     def _oops(self, failure):
         failure.raiseException()
-
+        
     def _saveRecords(self, rk):
         """
         Callback to save records returned from my reader
@@ -222,12 +286,10 @@ class Recorder(Base):
             row = makeRow(x)
             csvWriter.writerow(rowBase + row)
 
-        # Save the IP addresses if that option set
-        if self.opt['i']:
-            fh = open(self.opt['i'], 'w')
-            for ip in sorted(rk.ipList):
-                fh.write(ip + '\n')
-            fh.close()
+        # Save the IP addresses from purges if that option set
+        filePath = self.opt['s']
+        if filePath:
+            self.writeIPs(filePath, rk.ipList)
         # Now the actual records
         records = rk.records
         printRecords = self.opt['p']
@@ -256,10 +318,26 @@ class Recorder(Base):
         d.addCallbacks(lambda _ : reactor.stop(), self._oops)
         return d
 
+    def consolidate(self, outPath):
+        """
+        Consolidates dotted-quad addresses from selected ip rules with the
+        ones in my command-line filePath(s).
+        """
+        rr = RuleReader()
+        ipList = self.loadRules(consolidate=True)
+        for filePath in self.opt:
+            ipList.extend(rr.lines(filePath))
+        self.writeIPs(outPath, ipList)
+    
     def run(self):
-        self.reader = self.readerFactory()
-        reactor.callWhenRunning(self.load)
-        reactor.run()
+        if self.opt['c']:
+            outPath = self.opt['s']
+            self.checkPath(outPath)
+            self.consolidate(outPath)
+        else:
+            self.reader = self.readerFactory()
+            reactor.callWhenRunning(self.load)
+            reactor.run()
 
 
 def run():
