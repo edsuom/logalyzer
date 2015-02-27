@@ -107,7 +107,7 @@ LICENSE
 Copyright (C) 2015 Tellectual LLC
 """
 
-import csv
+import csv, marshal
 
 from twisted.internet import defer, threads
 
@@ -169,6 +169,9 @@ class Writer(Base):
                 ipLast = ip
         fh.close()
 
+    def formatBase(self):
+        return "\n{:4d}-{:02d}-{:02d}, {:02d}:{:02d}".format(*self.rowBase)
+    
     def makeRow(self, x):
         row = []
         if 'vhost' in self.fields:
@@ -178,7 +181,7 @@ class Writer(Base):
         if 'ua' in self.fields:
             row.append(x['ua'])
         return row
-        
+
     def recordator(self, records):
         """
         Flattens the supplied records dict of lists into a single
@@ -194,11 +197,10 @@ class Writer(Base):
 
         """
         keys = sorted(records.keys())
-        self.fields = records[keys[0]][0].keys()
         for dt in keys:
             self.rowBase = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
             if self.printRecords:
-                print "\n{:4d}-{:02d}-{:02d}, {:02d}:{:02d}".format(*rowBase)
+                print self.formatBase()
             theseRecords = records[dt]
             for thisRecord in theseRecords:
                 if self.printRecords:
@@ -206,10 +208,10 @@ class Writer(Base):
                         "{}: {}".format(x, y)
                         for x, y in thisRecord.iteritems()]
                     print ", ".join(itemList)
-                yield self.makeRow(theseRecords)
+                yield self.makeRow(thisRecord)
 
     def _setupCSV(self, filePath):
-        fh = open(csvFilePath, 'wb')
+        fh = open(filePath, 'wb')
         self._cw = csv.writer(fh, delimiter=self.csvDelimiter)
         self._cw.writerow(self.dateHeadings + self.makeRow(self.headings))
         return fh.close  # Do NOT call this, just return the shutterdowner
@@ -217,6 +219,14 @@ class Writer(Base):
     def _writeCSV(self, row):
         return threads.deferToThread(
             self._cw.writerow, self.rowBase + row)
+
+    def _setupPYO(self, filePath):
+        self._fhPYO = open(filePath, 'wb')
+        return self._fhPYO.close
+    
+    def _writePYO(self, row):
+        return threads.deferToThread(
+            marshal.dump, self.rowBase + row, self._fhPYO)
     
     @defer.deferredGenerator
     def write(self, records):
@@ -224,14 +234,13 @@ class Writer(Base):
         Writes records to all desired formats, returning a deferred that
         fires when the writing is done.
         """
-        def doneWriting(null):
-            
         sdList = []
         writers = []
+        self.fields = records.values()[0][0].keys()
         # Prepare my writers
         for writeType, filePath in self.writeTypes.iteritems():
             thisSetterUpper = getattr(self, "_setup{}".format(writeType))
-            fhList.append(thisSetterUpper(filePath))
+            sdList.append(thisSetterUpper(filePath))
             thisWriter = getattr(self, "_write{}".format(writeType))
             writers.append(thisWriter)
         # Write them records!

@@ -30,8 +30,7 @@ one or more output <files> (except if -c option set).
 The format of the output files is determined by their extension:
 
 .csv: Comma-separated (actually tabs) values, one row for each record
-.db:  SQLite database of records saved as sAsync persistent dictionary
-
+.pyo: Marshalled lists, read back by iterating marshal.load(fh)
 
 Specify particular ip, net, ua, bot, or ref rules in the rules
 directory with a comma-separated list after the -i, -n, -u, -b, or -r
@@ -44,6 +43,10 @@ WARNING: If any of your bot-detecting rules that purge IP addresses
 (bot, ref) match innocent search engines, e.g., with a url match to
 '/robots.txt', don't use the saved list (--save) to block access to
 your web server!
+
+You can skim through the CSV file with:
+
+less -x5,8,12,16,21,52,69,75,110,200 -S <file.csv>
 
 
 OPTIONS
@@ -141,7 +144,7 @@ class RuleReader(Base):
         Just returns a list of non-commented, non-blank lines from the
         specified filePath
         """
-        return list(linerator(filePath))
+        return list(self.linerator(filePath))
         
     def rules(self, extension, text):
         """
@@ -237,17 +240,22 @@ class Recorder(Base):
         """
         Callback to process records returned from my reader
         """
-        w = Writer(*list(self.opt), **{'printRecords': self.opt['p']})
         # Save the IP addresses from purges if that option set
         filePath = self.opt['s']
         if filePath:
-            w.writeIPs(rk.ipList, filePath)
-        # Now the actual records
-        return w.write(rk.records)
+            self.w.writeIPs(rk.ipList, filePath)
+        # Now write the actual records, returning the deferred from
+        # the writer
+        return self.w.write(rk.records)
         
     def load(self):
-        d = self.reader.run().addCallbacks(self._doneReading, self._oops)
-        d.addCallbacks(lambda _ : reactor.stop(), self._oops)
+        def allDone(null):
+            print "Done!"
+            reactor.stop()
+        
+        d = self.reader.run()
+        d.addCallbacks(self._doneReading, self._oops)
+        d.addCallbacks(allDone, self._oops)
         return d
 
     def consolidate(self, outPath):
@@ -255,16 +263,16 @@ class Recorder(Base):
         Consolidates dotted-quad addresses from selected ip rules with the
         ones in my command-line filePath(s).
         """
-        rr = RuleReader()
         ipList = self.loadRules(consolidate=True)
+        rr = RuleReader()
         for filePath in self.opt:
             ipList.extend(rr.lines(filePath))
-        self.writeIPs(outPath, ipList)
+        self.w.writeIPs(ipList, outPath)
     
     def run(self):
+        self.w = Writer(*list(self.opt), **{'printRecords': self.opt['p']})
         if self.opt['c']:
             outPath = self.opt['s']
-            self.checkPath(outPath)
             self.consolidate(outPath)
         else:
             self.reader = self.readerFactory()
