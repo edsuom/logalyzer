@@ -5,6 +5,7 @@
 # Ordinary indexers
 [bB]ot[^a-zA-Z]
 _bot$
+Bot$
 Yahoo
 [cC]rawler
 [sS]pider

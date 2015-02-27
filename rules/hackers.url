@@ -16,14 +16,14 @@
 # Anyone who attempts to access URLs matching these should be summarily blocked
 #------------------------------------------------------------------------------
 fckeditor
-wp\-admin/
-/[\w\-]+\.php
+/wp\-admin
+/[\w\-]+\.(php|swf)
 /tiny_mce/
 /etc/passwd
 /scripts/
 logitec\.se
 /account/
-//components/
+^//components/
 /backup
 /[a-z\.]+\.(zip|rar|gz)
 /cgi-sys
@@ -33,3 +33,11 @@ blogger\.com
 /mb-rip
 /cgi[\-/]
 DOCUMENT_ROOT
+/\w+nblock\.cgi
+/wp\-\w+/
+^//%\d\d%
+^/js/.+\.js
+/w00tw00t
+^http://w*\.ly\.com/
+/trackback/$
+^/administrator/

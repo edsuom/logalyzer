@@ -90,6 +90,10 @@ class IPMatcher(MatcherBase):
         # Prep for binary searches
         self.N = len(self.ipHashes)
         self.ipHashes = sorted(self.ipHashes)
+        # Cache for offenders
+        self.newCache()
+        # Cache for innocents
+        self.newCache()
 
     def dqToHash(self, ip):
         """
@@ -130,7 +134,21 @@ class IPMatcher(MatcherBase):
                 return True
             
     def __call__(self, ip):
-        return self.hasHash(self.dqToHash(ip))
+        # Likely to be several sequential hits from offenders and
+        # innocents alike
+        if self.checkCache(0, ip):
+            # Offender was cached
+            return True
+        if self.checkCache(1, ip):
+            # Innocent was cached
+            return False
+        if self.hasHash(self.dqToHash(ip)):
+            # Offender found
+            self.setCache(0, ip)
+            return True
+        # No offending IP address match
+        self.setCache(1, ip)
+        return False
 
 
 class NetMatcher(MatcherBase):
