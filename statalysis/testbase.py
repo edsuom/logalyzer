@@ -284,12 +284,14 @@ libwww
 RULES_BOT = """
 fckeditor
 /\w+\.php
+^/js/.+\.js
 /tiny_mce/
 /etc/passwd
 /scripts/
 logitec\.se
 /account/
 //components/
+/trackback/?$
 """.split('\n')
 
 

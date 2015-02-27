@@ -330,7 +330,7 @@ class Parser(Base):
         # First and fastest of all is checking for known bad guys
         if ip in self.rk.ipList or self.ipMatcher(ip):
             return
-        # Now check for secondary file, if we are ignored those
+        # Now check for secondary file, if we are ignoring those
         if self.ignoreSecondary and self.reSecondary.search(url):
             return
         # Then do some relatively easy exclusion checks, starting with

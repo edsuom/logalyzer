@@ -159,6 +159,9 @@ class TestBotMatcher(ReMatcherTestMixin, tb.TestCase):
         "/stuff/account/login",
         "/stupid/scripts/whatever.cgi",
         "/wherever/anything.php?arg1=foo?arg2=bar",
+        "/suomi/section-0007.html/trackback/",
+        "/js/transport.js",
+        "/html/section-0017.html/trackback/",
     )
         
             

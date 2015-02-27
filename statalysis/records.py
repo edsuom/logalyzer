@@ -19,13 +19,19 @@ sa [--vhost somehost.com]
    [--omit] [-y, --secondary]
    [-s, --save <file to save purged IPs>]
    [-v, --verbose]
-<file>
+<file> <file...>
 
 
 DESCRIPTION
 
 Analyzes log files in the directory where outFile is to go, producing
-an output <file> in CSV format (except if -c option set).
+one or more output <files> (except if -c option set).
+
+The format of the output files is determined by their extension:
+
+.csv: Comma-separated (actually tabs) values, one row for each record
+.db:  SQLite database of records saved as sAsync persistent dictionary
+
 
 Specify particular ip, net, ua, bot, or ref rules in the rules
 directory with a comma-separated list after the -i, -n, -u, -b, or -r
@@ -106,6 +112,7 @@ import csv
 from twisted.internet import reactor
 
 from util import Base
+from writer import Writer
 import logread
 
 
@@ -172,23 +179,12 @@ class Recorder(Base):
     less -x5,8,12,16,21,52,69,75,100,200 -S <file.csv>
 
     """
-    csvDelimiter = '\t'
-    
     ruleTable = (
         ('i', "ip",  "IPMatcher"),
         ('n', "net", "NetMatcher"),
         ('u', "ua",  "UAMatcher"),
         ('b', "url", "BotMatcher"),
         ('r', "ref", "RefMatcher"))
-    
-    headings = {
-        'vhost': "Virtual Host",
-        'ip':    "IP Address",
-        'code':  "HTTP",
-        'url':   "URL Requested",
-        'ref':   "Referrer",
-        'ua':    "User Agent",
-        }
     
     def __init__(self, opt):
         self.opt = opt
@@ -234,87 +230,23 @@ class Recorder(Base):
             cores=self.opt['cores'],
             verbose=self.verbose)
 
-    def ipToLong(self, ip):
-        """
-        Converts a dotted-quad IP address string to a long int. Adapted
-        from ipcalc.IP
-        """
-        q = ip.split('.')
-        q.reverse()
-        if len(q) > 4:
-            raise ValueError(
-                '%s: IPv4 address invalid: more than 4 bytes' % dq)
-        for x in q:
-            if not 0 <= int(x) <= 255:
-                raise ValueError(
-                    '%s: IPv4 address has invalid byte value' % dq)
-        while len(q) < 4:
-            q.insert(1, '0')
-        return sum(long(byte) << 8 * index for index, byte in enumerate(q))
-    
-    def writeIPs(self, filePath, ipList):
-        """
-        Writes the supplied list of ip addresses, in numerical order and
-        with no repeats, to the specified filePath.
-        """
-        ipLast = None
-        fh = open(filePath, 'w')
-        for ip in sorted(ipList, key=self.ipToLong):
-            if ip != ipLast:
-                fh.write(ip + '\n')
-                ipLast = ip
-        fh.close()
-    
     def _oops(self, failure):
         failure.raiseException()
         
-    def _saveRecords(self, rk):
+    def _doneReading(self, rk):
         """
-        Callback to save records returned from my reader
+        Callback to process records returned from my reader
         """
-        def makeRow(x):
-            row = []
-            if 'vhost' in fields:
-                row.append(x['vhost'])
-            for field in ('ip', 'code', 'url', 'ref'):
-                row.append(x[field])
-            if 'ua' in fields:
-                row.append(x['ua'])
-            return row
-        
-        def writeRow(x):
-            row = makeRow(x)
-            csvWriter.writerow(rowBase + row)
-
+        w = Writer(*list(self.opt), **{'printRecords': self.opt['p']})
         # Save the IP addresses from purges if that option set
         filePath = self.opt['s']
         if filePath:
-            self.writeIPs(filePath, rk.ipList)
+            w.writeIPs(rk.ipList, filePath)
         # Now the actual records
-        records = rk.records
-        printRecords = self.opt['p']
-        keys = sorted(records.keys())
-        cfh = open(self.csvFilePath, 'wb')
-        csvWriter = csv.writer(cfh, delimiter=self.csvDelimiter)
-        rowBase = ["Year", "Mo", "Day", "Hr", "Min"]
-        fields = records[keys[0]][0]
-        writeRow(self.headings)
-        for dt in keys:
-            rowBase = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
-            if printRecords:
-                print "\n{:4d}-{:02d}-{:02d}, {:02d}:{:02d}".format(*rowBase)
-            theseRecords = records[dt]
-            for thisRecord in theseRecords:
-                if printRecords:
-                    itemList = [
-                        "{}: {}".format(x, y)
-                        for x, y in thisRecord.iteritems()]
-                    print ", ".join(itemList)
-                writeRow(thisRecord)
-        cfh.close()
-    
+        return w.write(rk.records)
+        
     def load(self):
-        d = self.reader.run().addCallbacks(self._saveRecords, self._oops)
+        d = self.reader.run().addCallbacks(self._doneReading, self._oops)
         d.addCallbacks(lambda _ : reactor.stop(), self._oops)
         return d
 

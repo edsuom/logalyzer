@@ -226,26 +226,21 @@ class ReMatcherBase(MatcherBase):
     I efficiently match strings with regular expressions
     """
     def startup(self, rules):
-        # Cache for Offenders
-        self.newCache()
-        # Cache for innocents
+        # Cache for Offenders only
         self.newCache()
         self.re = self.reFromRules(rules)
     
     def __call__(self, ip, string):
-        # Likely to be several sequential hits from offenders and
-        # innocents alike
+        # Likely to be several sequential hits from offenders
         if self.checkCache(0, ip):
             # Offender was cached
             return True
-        if self.checkCache(1, ip):
-            # Innocent was cached
-            return False
-        if self.re.search(string):
+        # Sometimes offenders start with an innocent query, so no
+        # cache for innocents
+        if self.re.search(string.strip()):
             # Offender found
             self.setCache(0, ip)
             return True
-        self.setCache(1, ip)
         return False
 
 
