@@ -27,14 +27,18 @@ class TestRecordKeeper(tb.TestCase):
         self.rk = logread.RecordKeeper()
 
     def test_isRedirect(self):
-        vhost = self.rk.isRedirect("foo.com", ip1, 200)
+        wasRD, vhost = self.rk.isRedirect("foo.com", ip1, 200)
+        self.assertFalse(wasRD)
         self.assertEqual(vhost, "foo.com")
-        vhost = self.rk.isRedirect("foo.com", ip2, 302)
+        wasRD, vhost = self.rk.isRedirect("foo.com", ip2, 302)
+        self.assertFalse(wasRD)
         self.assertEqual(vhost, "foo.com")
         for k in xrange(10):
-            vhost = self.rk.isRedirect("bar.com", ip2, 200)
+            wasRD, vhost = self.rk.isRedirect("bar.com", ip2, 200)
+            self.assertTrue(wasRD)
             self.assertEqual(vhost, "foo.com")
-        vhost = self.rk.isRedirect("bar.com", ip1, 200)
+        wasRD, vhost = self.rk.isRedirect("bar.com", ip1, 200)
+        self.assertFalse(wasRD)
         self.assertEqual(vhost, "bar.com")
         
 

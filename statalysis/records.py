@@ -84,9 +84,6 @@ sensitive) that match url strings indicating a malicious bot
 Rules corresponding to .ref files containing regular expressions (case
 sensitive) that match referrer strings indicating a malicious bot
 
---omit
-Omit the user-agent string from the records
-
 -y, --secondary
 Ignore secondary files (css, webfonts, images)
 
@@ -228,14 +225,11 @@ class Recorder(Base):
         return logread.Reader(
             self.myDir, rules,
             vhost=self.opt['vhost'],
-            exclude=exclude, noUA=self.opt['omit'],
+            exclude=exclude,
             ignoreSecondary=self.opt['y'],
             cores=self.opt['cores'],
             verbose=self.verbose)
 
-    def _oops(self, failure):
-        failure.raiseException()
-        
     def _doneReading(self, rk):
         """
         Callback to process records returned from my reader
@@ -254,8 +248,8 @@ class Recorder(Base):
             reactor.stop()
         
         d = self.reader.run()
-        d.addCallbacks(self._doneReading, self._oops)
-        d.addCallbacks(allDone, self._oops)
+        d.addCallbacks(self._doneReading, self.oops)
+        d.addCallbacks(allDone, self.oops)
         return d
 
     def consolidate(self, outPath):

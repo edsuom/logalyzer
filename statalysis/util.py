@@ -48,7 +48,12 @@ class Base(object):
     @myDir.deleter
     def myDir(self):
         del self._myDir
-    
+
+    def dtFormat(self, dt):
+        return "{:4d}-{:02d}-{:02d}+{:02d}:{:02d}".format(
+            dt.year, dt.month, dt.day,
+            dt.hour, dt.minute)
+        
     def msg(self, proto, *args):
         if self.verbose:
             if args and args[-1].startswith('-'):
@@ -56,6 +61,9 @@ class Base(object):
                 proto += "\n{}"
             print proto.format(*args)
 
+    def oops(self, failure):
+        failure.raiseException()
+        
     def csvTextToList(self, text, converter):
         if text:
             return [converter(x.strip()) for x in text.split(',')]

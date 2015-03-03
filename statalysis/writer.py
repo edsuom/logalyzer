@@ -109,7 +109,7 @@ Copyright (C) 2015 Tellectual LLC
 
 import csv, marshal
 
-from twisted.internet import defer, threads
+from twisted.internet import defer, task
 
 from util import Base
 
@@ -120,15 +120,16 @@ class Writer(Base):
     """
     csvDelimiter = '\t'
 
-    dateHeadings = ["Year", "Mo", "Day", "Hr", "Min"]
-    headings = {
-        'vhost': "Virtual Host",
-        'ip':    "IP Address",
-        'code':  "HTTP",
-        'url':   "URL Requested",
-        'ref':   "Referrer",
-        'ua':    "User Agent",
-        }
+    dateHeadings = [
+        "Year", "Mo", "Day", "Hr", "Min"]
+    fields = (
+        ('vhost', "Virtual Host"),
+        ('ip',    "IP Address"),
+        ('code',  "HTTP"),
+        ('url',   "URL Requested"),
+        ('ref',   "Referrer"),
+        ('ua',    "User Agent"),
+    )
     
     def __init__(self, *filePaths, **kw):
         self.dList = []
@@ -136,7 +137,7 @@ class Writer(Base):
         for filePath in filePaths:
             thisType = filePath.split('.')[-1].upper()
             self.writeTypes[thisType] = filePath
-        self.printRecords = kw.get('printRecords', False)
+        self.verbose = kw.get('printRecords', False)
     
     def ipToLong(self, ip):
         """
@@ -169,18 +170,12 @@ class Writer(Base):
                 ipLast = ip
         fh.close()
 
-    def formatBase(self):
-        return "\n{:4d}-{:02d}-{:02d}, {:02d}:{:02d}".format(*self.rowBase)
-    
-    def makeRow(self, x):
-        row = []
-        if 'vhost' in self.fields:
-            row.append(x['vhost'])
-        for field in ('ip', 'code', 'url', 'ref'):
-            row.append(x[field])
-        if 'ua' in self.fields:
-            row.append(x['ua'])
-        return row
+    def headings(self):
+        headingNames = [x[1] for x in self.fields]
+        return self.dateHeadings + headingNames
+        
+    def makeRow(self, record):
+        return [record[x[0]] for x in self.fields]
 
     def recordator(self, records):
         """
@@ -198,56 +193,72 @@ class Writer(Base):
         """
         keys = sorted(records.keys())
         for dt in keys:
-            self.rowBase = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
-            if self.printRecords:
-                print self.formatBase()
+            self.msg("\n{}", self.dtFormat(dt), "-")
             theseRecords = records[dt]
-            for thisRecord in theseRecords:
-                if self.printRecords:
-                    itemList = [
-                        "{}: {}".format(x, y)
-                        for x, y in thisRecord.iteritems()]
-                    print ", ".join(itemList)
-                yield self.makeRow(thisRecord)
-
+            for k, thisRecord in enumerate(theseRecords):
+                self.msg("{:3d}: {}", k, thisRecord)
+                yield dt, k, thisRecord
+    
     def _setupCSV(self, filePath):
         fh = open(filePath, 'wb')
         self._cw = csv.writer(fh, delimiter=self.csvDelimiter)
-        self._cw.writerow(self.dateHeadings + self.makeRow(self.headings))
-        return fh.close  # Do NOT call this, just return the shutterdowner
-                
-    def _writeCSV(self, row):
-        return threads.deferToThread(
-            self._cw.writerow, self.rowBase + row)
+        self._cw.writerow(self.headings())
+        # Do NOT call this, just return the shutterdowner callable
+        return fh.close
+    
+    def _writeCSV(self, dt, k, record):
+        rowBase = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
+        self._cw.writerow(rowBase + self.makeRow(record))
 
     def _setupPYO(self, filePath):
         self._fhPYO = open(filePath, 'wb')
         return self._fhPYO.close
     
-    def _writePYO(self, row):
-        return threads.deferToThread(
-            marshal.dump, self.rowBase + row, self._fhPYO)
-    
-    @defer.deferredGenerator
+    def _writePYO(self, dt, k, record):
+        marshal.dump([self.dtFormat(dt), k, record], self._fhPYO)
+
+    def _setupDB(self, filePath):
+        self._t = database.Transactor(
+            "sqlite:///{}".format(filePath), echo=self.verbose)
+        return self._t.shutdown
+
+    def _writeDB(self, dt, k, record):
+        return self._t.newRecord(dt, k, record)
+            
     def write(self, records):
         """
         Writes records to all desired formats, returning a deferred that
         fires when the writing is done.
+
+        Each _writeXXX method is run cooperatively with the twisted
+        reactor. The methods can return deferreds or not.
         """
+        def runWriters():
+            for dt, k, thisRecord in self.recordator(records):
+                for thisWriter in writers:
+                    yield thisWriter(dt, k, thisRecord)
+
+        def setupDone(null):
+            # Now write them records!
+            d = task.Cooperator().coiterate(runWriters())
+            d.addCallbacks(doneWriting, self.oops)
+            return d
+
+        @defer.deferredGenerator
+        def doneWriting(null):
+            for shutterDowner in sdList:
+                yield defer.waitForDeferred(
+                    defer.maybeDeferred(shutterDowner))
+
+        dList = []
         sdList = []
         writers = []
-        self.fields = records.values()[0][0].keys()
         # Prepare my writers
         for writeType, filePath in self.writeTypes.iteritems():
             thisSetterUpper = getattr(self, "_setup{}".format(writeType))
-            sdList.append(thisSetterUpper(filePath))
             thisWriter = getattr(self, "_write{}".format(writeType))
             writers.append(thisWriter)
-        # Write them records!
-        for row in self.recordator(records):
-            dList = [thisWriter(row) for thisWriter in writers]
-            wfd = defer.waitForDeferred(defer.DeferredList(dList))
-            yield wfd
-        # Done writing, shut everything down
-        for shutterDowner in sdList:
-            shutterDowner()
+            d = defer.maybeDeferred(thisSetterUpper, filePath)
+            d.addCallbacks(sdList.append, self.oops)
+            dList.append(d)
+        return defer.DeferredList(dList).addCallbacks(setupDone, self.oops)

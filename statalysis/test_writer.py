@@ -46,9 +46,8 @@ class TestWriter(tb.TestCase):
         self.data.append(filePath)
         return self._sd
 
-    def _writeFOO(self, row):
-        self.data.append(row)
-        return defer.succeed(None)
+    def _writeFOO(self, dt, k, record):
+        self.data.append([dt, k, record])
 
     def _sd(self):
         self.data.append("SD")
@@ -58,7 +57,6 @@ class TestWriter(tb.TestCase):
             self.assertEqual(self.w.ipToLong(ip), long(ipcalc.IP(ip)))
 
     def test_makeRow(self):
-        self.w.fields = ['vhost']
         for theseRecords in RECORDS.values():
             for thisRecord in theseRecords:
                 row = self.w.makeRow(thisRecord)
@@ -67,13 +65,16 @@ class TestWriter(tb.TestCase):
                 self.assertEqual(row[2], thisRecord['code'])
                 self.assertEqual(row[3], thisRecord['url'])
                 self.assertEqual(row[4], thisRecord['ref'])
-                self.assertEqual(len(row), 5)
+                self.assertEqual(row[4], thisRecord['ua'])
+                self.assertEqual(len(row), 6)
 
     def test_recordator(self):
-        self.w.fields = RECORDS.values()[0][0].keys()
-        for k, row in enumerate(self.w.recordator(RECORDS)):
-            self.assertEqual(row[0], vhosts[k])
-            self.assertEqual(row[1], ips[k])
+        kValues = [0, 1, 0]
+        for j, stuff in enumerate(self.w.recordator(RECORDS)):
+            dt, k, record = stuff
+            self.assertEqual(k, kValues[j])
+            self.assertEqual(record['vhost'], vhosts[j])
+            self.assertEqual(record['ip'], ips[j])
 
     def test_write_basic(self):
         def done(null):
@@ -112,8 +113,8 @@ class TestWriter(tb.TestCase):
                         break
                     lists.append(obj)
             self.assertEqual(len(lists), 3)
-            self.assertEqual([x[5] for x in lists], vhosts)
-            self.assertEqual([x[6] for x in lists], ips)
+            self.assertEqual([x[2]['vhost'] for x in lists], vhosts)
+            self.assertEqual([x[2]['ip'] for x in lists], ips)
             
         pyoPath = tb.tempFiles(tb.fileInModuleDir("file.pyo"))[0]
         self.w.writeTypes['PYO'] = pyoPath
