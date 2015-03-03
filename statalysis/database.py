@@ -21,8 +21,8 @@ class Transactor(AccessBroker, Base):
     entries.
     """
     indexedValues = ['vhost', 'url', 'ref', 'ua']
-    colNames = ['code', 'was_rd', 'ip'] +\
-               ["{}_id".format(x) for x in indexedValues]
+    colNames = ['http', 'was_rd', 'ip'] +\
+               ["id_{}".format(x) for x in indexedValues]
 
     @defer.deferredGenerator
     def startup(self):
@@ -30,14 +30,14 @@ class Transactor(AccessBroker, Base):
             'entries',
             SA.Column('dt', SA.DateTime, primary_key=True),
             SA.Column('k', SA.SmallInteger, primary_key=True),
-            SA.Column('code', SA.SmallInteger, nullable=False),
+            SA.Column('http', SA.SmallInteger, nullable=False),
             SA.Column('was_rd', SA.Boolean, nullable=False),
             SA.Column('ip', SA.String(15), nullable=False),
             
-            SA.Column('vhost_id', SA.Integer, nullable=False),
-            SA.Column('url_id', SA.Integer, nullable=False),
-            SA.Column('ref_id', SA.Integer),
-            SA.Column('ua_id', SA.Integer),
+            SA.Column('id_vhost', SA.Integer, nullable=False),
+            SA.Column('id_url', SA.Integer, nullable=False),
+            SA.Column('id_ref', SA.Integer),
+            SA.Column('id_ua', SA.Integer),
         ))
         for name in self.indexedValues:
             yield dw(self.table(
@@ -45,7 +45,7 @@ class Transactor(AccessBroker, Base):
                 SA.Column('id', SA.Integer, primary_key=True),
                 SA.Column('value', SA.String(255)),
             ))
-    
+
     @transact
     def setEntry(self, dt, k, values):
         """
@@ -53,18 +53,17 @@ class Transactor(AccessBroker, Base):
         datetime-sequence combination dt-k, complaining if one already
         exists that is different. See my colNames attribute for the
         six values you need to supply.
+
+        Returns a deferred that fires with True if a new entry was
+        added or already present with the same values, False if it was
+        already present but with different values.
         """
         def checkExisting(rowValues):
             for k, value in enumerate(rowValues):
                 if value != values[k]:
-                    raise Exception(
-                        "Differing entry already found at {}: {:d}".format(
-                            self.dtFormat(dt), k))
-        
-        if len(values) != 7:
-            raise ValueError(
-                "Must specify values for {}".format(
-                    ", ".join(self.colNames)))
+                    return False
+            return True
+
         col = self.entries.c
         if not self.s('entry_present'):
             cList = [getattr(col, x) for x in self.colNames]
@@ -73,14 +72,13 @@ class Transactor(AccessBroker, Base):
                 SA.and_(col.dt == SA.bindparam('dt'),
                         col.k == SA.bindparam('k')))
         row = self.s().execute(dt=dt, k=k).fetchone()
-        print "ROW", row
         if row:
-            checkExisting(row[0])
-            return
+            return checkExisting(row)
         kw = {'dt': dt, 'k': k}
-        for j, name in enumerate(colNames):
+        for j, name in enumerate(self.colNames):
             kw[name] = values[j]
         self.entries.insert().execute(**kw)
+        return True
 
     @transact
     def setNameValue(self, name, value):
@@ -93,9 +91,8 @@ class Transactor(AccessBroker, Base):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
         row = self.s().execute(value=value).fetchone()
         if row:
-            return row[0][0]
+            return row[0]
         rp = table.insert().execute(value=value)
-        #import pdb; pdb.set_trace()
         return rp.lastrowid
 
     @defer.deferredGenerator
@@ -104,7 +101,7 @@ class Transactor(AccessBroker, Base):
         Adds all needed database entries for the supplied record at
         the specified datetime-sequence combination dt-k.
         """
-        values = [record[x] for x in ('code', 'was_rd', 'ip')]
+        values = [record[x] for x in ('http', 'was_rd', 'ip')]
         for name in self.indexedValues:
             wfd = dw(self.setNameValue(name, record[name]))
             yield wfd
@@ -113,6 +110,21 @@ class Transactor(AccessBroker, Base):
 
     @transact
     def getEntry(self, dt, k):
+        """
+        Doesn't work, but not needed except for testing, for now:
+
+        Failure: sqlalchemy.exc.OperationalError: (OperationalError)
+        ambiguous column name: entries.http u'SELECT entries.http AS
+        entries_http, entries.was_rd AS entries_was_rd, entries.ip AS
+        entries_ip, vhost.value AS vhost_value, url.value AS
+        url_value, ref.value AS ref_value, ua.value AS ua_value \nFROM
+        entries JOIN vhost ON entries.id_vhost = vhost.id, entries
+        JOIN url ON entries.id_url = url.id, entries JOIN ref ON
+        entries.id_ref = ref.id, entries JOIN ua ON entries.id_ua =
+        ua.id \nWHERE entries.dt = ? AND entries.k = ?' ('2015-02-20
+        12:02:49.000000', 0)
+
+        """
         E = self.entries
         VH = self.vhost
         VU = self.url
@@ -120,28 +132,20 @@ class Transactor(AccessBroker, Base):
         VA = self.ua
         if not self.s('joined_entries'):
             self.s(
-                [E.c.code, E.c.was_rd, E.c.ip,
+                [E.c.http, E.c.was_rd, E.c.ip,
                  VH.c.value, VU.c.value, VR.c.value, VA.c.value],
                 SA.and_(
                     E.c.dt == SA.bindparam('dt'),
                     E.c.k == SA.bindparam('k')),
                 from_obj=[
-                    E.join(VH, E.c.vhost_id == VH.c.id),
-                    E.join(VU, E.c.url_id == VU.c.id),
-                    E.join(VR, E.c.ref_id == VR.c.id),
-                    E.join(VA, E.c.ua_id == VA.c.id),
-                    ]
+                    E.join(VH, E.c.id_vhost == VH.c.id),
+                    E.join(VU, E.c.id_url == VU.c.id),
+                    E.join(VR, E.c.id_ref == VR.c.id),
+                    E.join(VA, E.c.id_ua == VA.c.id),
+                    ],
+                use_labels = True,
             )
-        row = self.s().execute(dt=dt, k=k).fetchone()
-        if row:
-            return row[0]
-        return None
-    
-                    
-                        
+        return self.s().execute(dt=dt, k=k).fetchone()
 
-
-            
-            
             
             

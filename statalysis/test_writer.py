@@ -29,14 +29,14 @@ ip2 = "32.132.214.244"
 RECORDS = {
     dt1: [
         {'vhost': "foo.com",
-         'ip': ip1, 'code': 200, 'was_rd': False,
+         'ip': ip1, 'http': 200, 'was_rd': False,
          'url': "/", 'ref': "-", 'ua': "-"},
         {'vhost': "foo.com",
-         'ip': ip1, 'code': 200, 'was_rd': False,
+         'ip': ip1, 'http': 200, 'was_rd': False,
          'url': "/image.png", 'ref': "-", 'ua': "-"}],
     dt2: [
         {'vhost': "bar.com",
-         'ip': ip2, 'code': 404, 'was_rd': False,
+         'ip': ip2, 'http': 404, 'was_rd': False,
          'url': "/", 'ref': "-", 'ua': "-"}],
     }
 
@@ -70,7 +70,7 @@ class TestWriter(tb.TestCase):
                 row = self.w.makeRow(thisRecord)
                 self.assertEqual(row[0], thisRecord['vhost'])
                 self.assertEqual(row[1], thisRecord['ip'])
-                self.assertEqual(row[2], thisRecord['code'])
+                self.assertEqual(row[2], thisRecord['http'])
                 self.assertEqual(row[3], thisRecord['url'])
                 self.assertEqual(row[4], thisRecord['ref'])
                 self.assertEqual(row[4], thisRecord['ua'])
@@ -148,6 +148,6 @@ class TestWriter(tb.TestCase):
             self.assertEqual(values[2], vhosts[0])
             self.assertEqual(values[3], ips[0])
             
-        dbPath = tb.tempFiles(tb.fileInModuleDir("file.db"))[0]
+        dbPath = "file.db"
         self.w.writeTypes['DB'] = dbPath
         return self.w.write(RECORDS).addCallback(done)
