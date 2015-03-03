@@ -62,7 +62,7 @@ class Base(object):
             print proto.format(*args)
 
     def oops(self, failure):
-        failure.raiseException()
+        failure.printDetailedTraceback()
         
     def csvTextToList(self, text, converter):
         if text:

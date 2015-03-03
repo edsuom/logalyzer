@@ -17,22 +17,30 @@ from twisted.python import failure
 
 import testbase as tb
 
-import writer
+import database, writer
+
+
+dt1 = dt(2015, 2, 20, 12, 2, 49)
+dt2 = dt(2015, 3, 2, 21, 17, 16)
 
 ip1 = "171.127.9.141"
 ip2 = "32.132.214.244"
 
 RECORDS = {
-    dt(2015, 2, 20, 12, 2, 49): [
-        {'vhost': "foo.com", 'ip': ip1, 'code': 200,
+    dt1: [
+        {'vhost': "foo.com",
+         'ip': ip1, 'code': 200, 'was_rd': False,
          'url': "/", 'ref': "-", 'ua': "-"},
-        {'vhost': "foo.com", 'ip': ip1, 'code': 200,
+        {'vhost': "foo.com",
+         'ip': ip1, 'code': 200, 'was_rd': False,
          'url': "/image.png", 'ref': "-", 'ua': "-"}],
-    dt(2015, 3, 2, 21, 17, 16): [
-        {'vhost': "bar.com", 'ip': ip2, 'code': 404,
+    dt2: [
+        {'vhost': "bar.com",
+         'ip': ip2, 'code': 404, 'was_rd': False,
          'url': "/", 'ref': "-", 'ua': "-"}],
     }
 
+months = ["2", "2", "3"]
 vhosts = ["foo.com", "foo.com", "bar.com"]
 ips = [ip1, ip1, ip2]
 
@@ -90,10 +98,16 @@ class TestWriter(tb.TestCase):
     def test_write_csv(self):
         def done(null):
             self.assertTrue(os.path.isfile(csvPath))
-            print "\nCSV file:\n"
             with open(csvPath, 'rb') as fh:
                 for k, line in enumerate(fh):
-                    print k, line.strip()
+                    fields = line.split('\t')
+                    self.assertEqual(len(fields), 11)
+                    if k == 0:
+                        continue
+                    self.assertEqual(fields[0], "2015")
+                    self.assertEqual(fields[1], months[k-1])
+                    self.assertEqual(fields[5], vhosts[k-1])
+                    self.assertEqual(fields[6], ips[k-1])
             
         csvPath = tb.tempFiles(tb.fileInModuleDir("file.csv"))[0]
         self.w.writeTypes['CSV'] = csvPath
@@ -113,11 +127,27 @@ class TestWriter(tb.TestCase):
                         break
                     lists.append(obj)
             self.assertEqual(len(lists), 3)
-            self.assertEqual([x[2]['vhost'] for x in lists], vhosts)
             self.assertEqual([x[2]['ip'] for x in lists], ips)
+            self.assertEqual([x[2]['vhost'] for x in lists], vhosts)
+
             
         pyoPath = tb.tempFiles(tb.fileInModuleDir("file.pyo"))[0]
         self.w.writeTypes['PYO'] = pyoPath
         return self.w.write(RECORDS).addCallback(done)
 
-        
+    def test_write_db(self):
+        @defer.deferredGenerator
+        def done(null):
+            self.assertTrue(os.path.isfile(dbPath))
+            t = database.Transactor("sqlite:///{}".format(dbPath))
+            wfd = defer.waitForDeferred(t.getEntry(dt1, 0))
+            yield wfd
+            values = wfd.getResult()
+            self.assertEqual(len(values), 6)
+            self.assertFalse(values[1])
+            self.assertEqual(values[2], vhosts[0])
+            self.assertEqual(values[3], ips[0])
+            
+        dbPath = tb.tempFiles(tb.fileInModuleDir("file.db"))[0]
+        self.w.writeTypes['DB'] = dbPath
+        return self.w.write(RECORDS).addCallback(done)

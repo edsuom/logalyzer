@@ -111,6 +111,7 @@ import csv, marshal
 
 from twisted.internet import defer, task
 
+import database
 from util import Base
 
 
@@ -219,7 +220,7 @@ class Writer(Base):
 
     def _setupDB(self, filePath):
         self._t = database.Transactor(
-            "sqlite:///{}".format(filePath), echo=self.verbose)
+            "sqlite:///{}".format(filePath))
         return self._t.shutdown
 
     def _writeDB(self, dt, k, record):
