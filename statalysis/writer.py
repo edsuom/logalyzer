@@ -176,8 +176,11 @@ class Writer(Base):
         return self.dateHeadings + headingNames
         
     def makeRow(self, record):
-        return [record[x[0]] for x in self.fields]
-
+        row = [record[x[0]] for x in self.fields]
+        if record['was_rd']:
+            row[0] += "*"
+        return row
+    
     def recordator(self, records):
         """
         Flattens the supplied records dict of lists into a single

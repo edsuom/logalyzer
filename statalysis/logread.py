@@ -352,11 +352,12 @@ class Parser(Base):
             'http': http,
             'ip': ip, 'url': url, 'ref': ref, 'ua': ua }
         record['was_rd'], record['vhost'] = self.rk.isRedirect(vhost, ip, http)
-        if self.vhost == record['vhost']:
+        if self.vhost and self.vhost != record['vhost']:
             # Excluded vhost, so bail right now
             return
-        # The last and most time-consuming check is for excluded
-        # networks. Only done if all other checks have passed.
+        # The last and by FAR the most time-consuming check is for
+        # excluded networks. Only done if all other checks have
+        # passed.
         if self.netMatcher(ip):
             return
         return dt, record
