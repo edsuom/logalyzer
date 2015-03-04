@@ -8,7 +8,6 @@ Copyright (C) 2015 Tellectual LLC
 """
 
 from twisted.internet import defer
-from twisted.internet.defer import waitForDeferred as dw
 
 from sasync.database import transact, SA, AccessBroker
 
@@ -20,13 +19,14 @@ class Transactor(AccessBroker, Base):
     I handle transactions for an efficient database of logfile
     entries.
     """
+    directValues = ['http', 'was_rd', 'ip']
     indexedValues = ['vhost', 'url', 'ref', 'ua']
-    colNames = ['http', 'was_rd', 'ip'] +\
+    colNames = directValues +\
                ["id_{}".format(x) for x in indexedValues]
 
-    @defer.deferredGenerator
+    @defer.inlineCallbacks
     def startup(self):
-        yield dw(self.table(
+        yield self.table(
             'entries',
             SA.Column('dt', SA.DateTime, primary_key=True),
             SA.Column('k', SA.SmallInteger, primary_key=True),
@@ -38,14 +38,24 @@ class Transactor(AccessBroker, Base):
             SA.Column('id_url', SA.Integer, nullable=False),
             SA.Column('id_ref', SA.Integer),
             SA.Column('id_ua', SA.Integer),
-        ))
+        )
         for name in self.indexedValues:
-            yield dw(self.table(
+            yield self.table(
                 name,
                 SA.Column('id', SA.Integer, primary_key=True),
                 SA.Column('value', SA.String(255)),
-            ))
+            )
 
+    def _entry(self, dt, k):
+        col = self.entries.c
+        if not self.s('s_entry'):
+            cList = [getattr(col, x) for x in self.colNames]
+            self.s(
+                cList,
+                SA.and_(col.dt == SA.bindparam('dt'),
+                        col.k == SA.bindparam('k')))
+        return self.s().execute(dt=dt, k=k).fetchone()
+            
     @transact
     def setEntry(self, dt, k, values):
         """
@@ -64,14 +74,7 @@ class Transactor(AccessBroker, Base):
                     return False
             return True
 
-        col = self.entries.c
-        if not self.s('entry_present'):
-            cList = [getattr(col, x) for x in self.colNames]
-            self.s(
-                cList,
-                SA.and_(col.dt == SA.bindparam('dt'),
-                        col.k == SA.bindparam('k')))
-        row = self.s().execute(dt=dt, k=k).fetchone()
+        row = self._entry(dt, k)
         if row:
             return checkExisting(row)
         kw = {'dt': dt, 'k': k}
@@ -87,7 +90,7 @@ class Transactor(AccessBroker, Base):
         entry for it there if necessary.
         """
         table = getattr(self, name)
-        if not self.s("{}_present".format(name)):
+        if not self.s("s_{}".format(name)):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
         row = self.s().execute(value=value).fetchone()
         if row:
@@ -95,57 +98,37 @@ class Transactor(AccessBroker, Base):
         rp = table.insert().execute(value=value)
         return rp.lastrowid
 
-    @defer.deferredGenerator
-    def newRecord(self, dt, k, record):
+    @defer.inlineCallbacks
+    def setRecord(self, dt, k, record):
         """
         Adds all needed database entries for the supplied record at
         the specified datetime-sequence combination dt-k.
         """
         values = [record[x] for x in ('http', 'was_rd', 'ip')]
         for name in self.indexedValues:
-            wfd = dw(self.setNameValue(name, record[name]))
-            yield wfd
-            values.append(wfd.getResult())
-        yield dw(self.setEntry(dt, k, values))
+            value = yield self.setNameValue(name, record[name])
+            values.append(value)
+        result = yield self.setEntry(dt, k, values)
+        defer.returnValue(result)
 
     @transact
-    def getEntry(self, dt, k):
+    def getRecord(self, dt, k):
         """
-        Doesn't work, but not needed except for testing, for now:
-
-        Failure: sqlalchemy.exc.OperationalError: (OperationalError)
-        ambiguous column name: entries.http u'SELECT entries.http AS
-        entries_http, entries.was_rd AS entries_was_rd, entries.ip AS
-        entries_ip, vhost.value AS vhost_value, url.value AS
-        url_value, ref.value AS ref_value, ua.value AS ua_value \nFROM
-        entries JOIN vhost ON entries.id_vhost = vhost.id, entries
-        JOIN url ON entries.id_url = url.id, entries JOIN ref ON
-        entries.id_ref = ref.id, entries JOIN ua ON entries.id_ua =
-        ua.id \nWHERE entries.dt = ? AND entries.k = ?' ('2015-02-20
-        12:02:49.000000', 0)
-
+        Returns a (deferred) dict containing the record for the specified
+        datetime-sequence combination dt-k.
         """
-        E = self.entries
-        VH = self.vhost
-        VU = self.url
-        VR = self.ref
-        VA = self.ua
-        if not self.s('joined_entries'):
-            self.s(
-                [E.c.http, E.c.was_rd, E.c.ip,
-                 VH.c.value, VU.c.value, VR.c.value, VA.c.value],
-                SA.and_(
-                    E.c.dt == SA.bindparam('dt'),
-                    E.c.k == SA.bindparam('k')),
-                from_obj=[
-                    E.join(VH, E.c.id_vhost == VH.c.id),
-                    E.join(VU, E.c.id_url == VU.c.id),
-                    E.join(VR, E.c.id_ref == VR.c.id),
-                    E.join(VA, E.c.id_ua == VA.c.id),
-                    ],
-                use_labels = True,
-            )
-        return self.s().execute(dt=dt, k=k).fetchone()
-
+        result = {}
+        row = list(self._entry(dt, k))
+        for j, name in enumerate(self.directValues):
+            result[name] = row[j]
+        for j, name in enumerate(self.indexedValues):
+            ID = row[j+3]
+            cols = getattr(getattr(self, name), 'c')
+            for sh in self.selectorator(cols.value):
+                sh.where(cols.id == ID)
+            result[name] = sh().fetchone()[0]
+        return result
             
+                
+                
             

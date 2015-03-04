@@ -33,13 +33,13 @@ class RecordKeeper(object):
         self.newKeys = []
         self.redirects = OrderedDict()
         
-    def isRedirect(self, vhost, ip, code):
+    def isRedirect(self, vhost, ip, http):
         """
         Checks if this vhost is the destination of a redirect from another
         one, and replace it with the old one if so.
         """
         wasRedirect = False
-        if code in [301, 302]:
+        if http in [301, 302]:
             # This is a redirect, so save my vhost for the inevitable
             # check from the same IP address
             self.redirects[ip] = vhost
@@ -274,7 +274,7 @@ class Parser(Base):
         """
         Parses an individual logfile line and returns a list:
 
-        [vhost, Requestor IP address, datetime, url, code, referrer, UA]
+        [vhost, Requestor IP address, datetime, url, http, referrer, UA]
 
         """
         dt = None
@@ -302,7 +302,7 @@ class Parser(Base):
         object and dict for each valid line. The dict contains the
         following entries:
 
-        code:   HTTP code
+        http:   HTTP code
         vhost:  Virtual host requested
         was_rd: C{True} if there was a redirect to this URL
         ip:     Requestor IP address
@@ -325,7 +325,7 @@ class Parser(Base):
         if stuff is None:
             # Bogus line
             return
-        vhost, ip, dt, url, code, ref, ua = stuff
+        vhost, ip, dt, url, http, ref, ua = stuff
         # First and fastest of all is checking for known bad guys
         if ip in self.rk.ipList or self.ipMatcher(ip):
             return
@@ -340,7 +340,7 @@ class Parser(Base):
                 self.msg(line)
             return
         if self.exclude:
-            if code in self.exclude:
+            if http in self.exclude:
                 # Excluded code
                 return
         if self.uaMatcher(ip, ua):
@@ -349,9 +349,9 @@ class Parser(Base):
         # OK, this is an approved record ... unless the vhost is
         # excluded, and unless there is an IP address match
         record = {
-            'code': code,
+            'http': http,
             'ip': ip, 'url': url, 'ref': ref, 'ua': ua }
-        record['was_rd'], record['vhost'] = self.rk.isRedirect(vhost, ip, code)
+        record['was_rd'], record['vhost'] = self.rk.isRedirect(vhost, ip, http)
         if self.vhost == record['vhost']:
             # Excluded vhost, so bail right now
             return

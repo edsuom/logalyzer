@@ -224,7 +224,7 @@ class Writer(Base):
         return self._t.shutdown
 
     def _writeDB(self, dt, k, record):
-        return self._t.newRecord(dt, k, record)
+        return self._t.setRecord(dt, k, record)
             
     def write(self, records):
         """

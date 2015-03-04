@@ -9,7 +9,7 @@ statalysis: Analyzes web server log files
 
 SYNOPSIS
 sa [--vhost somehost.com]
-   [-p] [-e, --exclude code1,code2,...]
+   [-p] [-e, --exclude http1,http2,...]
    [-d, --ruledir <directory of rule files>]
      [-i, --ip  [xX]|rule1,rule2,...]
      [-n, --net [xX]|rule1,rule2,...]

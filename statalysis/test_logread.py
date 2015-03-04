@@ -99,16 +99,16 @@ class TestParser(tb.TestCase):
         dtStuff = dt(2015, 1, 1, 12, 30)
         stuffBase = ["foo.com", ip1, dtStuff, "/"]
         self.p.exclude = [400, 404]
-        for code, expectReject in (
+        for http, expectReject in (
                 (200, False), (301, False), (400, True), (404, True)):
-            result = mr(code, "-", "-")
+            result = mr(http, "-", "-")
             if expectReject:
-                self.assertNone(result, code)
+                self.assertNone(result, http)
             else:
-                self.assertNotNone(result, code)
+                self.assertNotNone(result, http)
         self.p.exclude = []
-        for code in (200, 301, 400, 404):
-            self.assertNotNone(mr(code, "-", "-"))
+        for http in (200, 301, 400, 404):
+            self.assertNotNone(mr(http, "-", "-"))
         stuffBase.append(200)
         # Excluded UA
         x = self.p.uaMatcher

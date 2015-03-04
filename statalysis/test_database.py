@@ -27,14 +27,14 @@ ip2 = "32.132.214.244"
 RECORDS = {
     dt1: [
         {'vhost': "foo.com",
-         'ip': ip1, 'code': 200, 'was_rd': False,
+         'ip': ip1, 'http': 200, 'was_rd': False,
          'url': "/", 'ref': "-", 'ua': "-"},
         {'vhost': "foo.com",
-         'ip': ip1, 'code': 200, 'was_rd': False,
+         'ip': ip1, 'http': 200, 'was_rd': False,
          'url': "/image.png", 'ref': "-", 'ua': "-"}],
     dt2: [
         {'vhost': "bar.com",
-         'ip': ip2, 'code': 404, 'was_rd': False,
+         'ip': ip2, 'http': 404, 'was_rd': False,
          'url': "/", 'ref': "-", 'ua': "-"}],
     }
 
@@ -71,7 +71,7 @@ class TestTransactor(tb.TestCase):
             values[0] = 404
             return self.t.setEntry(
                 dt1, 1, values).addCallback(self.assertFalse)
-        
+
         values = [
             200, False, ip1,
             1, # vhost_id
@@ -80,3 +80,14 @@ class TestTransactor(tb.TestCase):
             1, # ua_id
         ]
         return self.t.setEntry(dt1, 0, values).addCallback(cb1)
+
+    def test_setRecord(self):
+        def cb1(result):
+            self.assertTrue(result)
+            return self.t.getRecord(dt1, 0).addCallback(cb2)
+
+        def cb2(record):
+            self.assertEqual(record, firstRecord)
+
+        firstRecord = RECORDS[dt1][0]
+        return self.t.setRecord(dt1, 0, firstRecord).addCallback(cb1)

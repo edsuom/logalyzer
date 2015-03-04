@@ -136,17 +136,15 @@ class TestWriter(tb.TestCase):
         return self.w.write(RECORDS).addCallback(done)
 
     def test_write_db(self):
-        @defer.deferredGenerator
+        @defer.inlineCallbacks
         def done(null):
             self.assertTrue(os.path.isfile(dbPath))
             t = database.Transactor("sqlite:///{}".format(dbPath))
-            wfd = defer.waitForDeferred(t.getEntry(dt1, 0))
-            yield wfd
-            values = wfd.getResult()
-            self.assertEqual(len(values), 6)
-            self.assertFalse(values[1])
-            self.assertEqual(values[2], vhosts[0])
-            self.assertEqual(values[3], ips[0])
+            record = yield t.getRecord(dt1, 0)
+            self.assertEqual(len(record), 7)
+            self.assertFalse(record['was_rd'])
+            self.assertEqual(record['ip'], ips[0])
+            self.assertEqual(record['vhost'], vhosts[0])
             
         dbPath = "file.db"
         self.w.writeTypes['DB'] = dbPath
