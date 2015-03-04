@@ -8,9 +8,11 @@ Copyright (C) 2014-2015 Tellectual LLC
 """
 
 import re, os.path, array
-from collections import deque
+
 
 import ipcalc
+
+import util
 
 
 class MatcherBase(object):
@@ -23,6 +25,7 @@ class MatcherBase(object):
             rule = rule.strip()
             if rule:
                 clean.append(rule)
+        self.cm = util.CacheManager()
         self.startup(clean)
 
     def reFromRules(self, rules):
@@ -40,41 +43,6 @@ class MatcherBase(object):
         """
         raise NotImplementedError("Must define a startup method")
     
-    def newCache(self, N=30):
-        """
-        Generates the FIFO queue for a new sort-of LRU cache of strings
-        and returns its index, starting with 0 for the first cache.
-        """
-        if not hasattr(self, 'caches'):
-            self.caches = []
-        thisCache = deque([""], N)
-        self.caches.append(thisCache)
-        return len(self.caches) - 1
-
-    def clearCache(self, value=None):
-        for cache in self.caches:
-            if value is None:
-                cache.clear()
-            while cache.count(value):
-                cache.remove(value)
-    
-    def checkCache(self, k, x):
-        """
-        Checks cache k for the string x, returning True if it's there or
-        False if not.
-        """
-        return bool(self.caches[k].count(x))
-
-    def setCache(self, k, x):
-        """
-        Appends x to cache k, which will result in it being found there if
-        checked within N cache misses.
-
-        The value least recently added (from a cache miss) will be
-        popped off the other end. It isn't strictly an LRU cache,
-        since a cache hit will be drowned in misses.
-        """
-        self.caches[k].append(x)
 
 
 class IPMatcher(MatcherBase):
@@ -91,9 +59,9 @@ class IPMatcher(MatcherBase):
         self.N = len(self.ipHashes)
         self.ipHashes = sorted(self.ipHashes)
         # Cache for offenders
-        self.newCache()
+        self.cm.new()
         # Cache for innocents
-        self.newCache()
+        self.cm.new()
 
     def dqToHash(self, ip):
         """
@@ -136,18 +104,18 @@ class IPMatcher(MatcherBase):
     def __call__(self, ip):
         # Likely to be several sequential hits from offenders and
         # innocents alike
-        if self.checkCache(0, ip):
+        if self.cm.check(0, ip):
             # Offender was cached
             return True
-        if self.checkCache(1, ip):
+        if self.cm.check(1, ip):
             # Innocent was cached
             return False
         if self.hasHash(self.dqToHash(ip)):
             # Offender found
-            self.setCache(0, ip)
+            self.cm.set(0, ip)
             return True
         # No offending IP address match
-        self.setCache(1, ip)
+        self.cm.set(1, ip)
         return False
 
 
@@ -160,9 +128,9 @@ class NetMatcher(MatcherBase):
     def startup(self, rules):
         self.networks = []
         # Cache for offenders
-        self.newCache()
+        self.cm.new()
         # Cache for innocents
-        self.newCache()
+        self.cm.new()
         # LongInt lookup table for making it faster to add rules.
         self.netLongs = array.array('L')
         # Add the rules
@@ -198,10 +166,10 @@ class NetMatcher(MatcherBase):
     def __call__(self, ip):
         # Likely to be several sequential hits from offenders and
         # innocents alike
-        if self.checkCache(0, ip):
+        if self.cm.check(0, ip):
             # Offender was cached
             return True
-        if self.checkCache(1, ip):
+        if self.cm.check(1, ip):
             # Innocent was cached
             return False
         ipObject = ipcalc.IP(ip)
@@ -213,11 +181,11 @@ class NetMatcher(MatcherBase):
         for netAndCount in self.networks:
             if netAndCount[0].has_key(ipObject):
                 # Offender found
-                self.setCache(0, ip)
+                self.cm.set(0, ip)
                 netAndCount[1] += 1
                 self.networks.sort(key=lambda x: x[1], reverse=True)
                 return True
-        self.setCache(1, ip)
+        self.cm.set(1, ip)
         return False
 
 
@@ -227,19 +195,19 @@ class ReMatcherBase(MatcherBase):
     """
     def startup(self, rules):
         # Cache for Offenders only
-        self.newCache()
+        self.cm.new()
         self.re = self.reFromRules(rules)
     
     def __call__(self, ip, string):
         # Likely to be several sequential hits from offenders
-        if self.checkCache(0, ip):
+        if self.cm.check(0, ip):
             # Offender was cached
             return True
         # Sometimes offenders start with an innocent query, so no
         # cache for innocents
         if self.re.search(string.strip()):
             # Offender found
-            self.setCache(0, ip)
+            self.cm.set(0, ip)
             return True
         return False
 

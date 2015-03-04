@@ -11,10 +11,10 @@ from twisted.internet import defer
 
 from sasync.database import transact, SA, AccessBroker
 
-from util import Base
+import util
 
 
-class Transactor(AccessBroker, Base):
+class Transactor(AccessBroker, util.Base):
     """
     I handle transactions for an efficient database of logfile
     entries.
@@ -24,6 +24,16 @@ class Transactor(AccessBroker, Base):
     colNames = directValues +\
                ["id_{}".format(x) for x in indexedValues]
 
+    def cacheSetup(self):
+        """
+        Sets up caches for values written to the indexed value tables
+        """
+        self.cm = util.CacheManager()
+        self.cachedValues = {}
+        for name in self.indexedValues:
+            self.cm.new(name)
+            self.cachedValues[name] = {}
+    
     @defer.inlineCallbacks
     def startup(self):
         yield self.table(
@@ -104,9 +114,20 @@ class Transactor(AccessBroker, Base):
         Adds all needed database entries for the supplied record at
         the specified datetime-sequence combination dt-k.
         """
+        if not hasattr(self, 'cm'):
+            self.cacheSetup()
         values = [record[x] for x in ('http', 'was_rd', 'ip')]
         for name in self.indexedValues:
-            value = yield self.setNameValue(name, record[name])
+            valueDict = self.cachedValues[name]
+            ID = record[name]
+            if self.cm.check(name, ID):
+                value = valueDict[ID]
+            else:
+                value = yield self.setNameValue(name, ID)
+                discardedID = self.cm.set(name, ID, getOldest=True)
+                if discardedID in valueDict:
+                    del valueDict[discardedID]
+                valueDict[ID] = value
             values.append(value)
         result = yield self.setEntry(dt, k, values)
         defer.returnValue(result)
