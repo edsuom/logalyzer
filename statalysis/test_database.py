@@ -43,14 +43,28 @@ vhosts = ["foo.com", "foo.com", "bar.com"]
 ips = [ip1, ip1, ip2]
 
 
+def makeEntry(http, was_rd, ip, *ids):
+    result = [http, was_rd, ip]
+    for thisID in ids:
+        result.append(thisID)
+    for k in xrange(4-len(ids)):
+        result.append(1)
+    return result
+
+
+
+
 class TestTransactor(tb.TestCase):
     def setUp(self):
         self.dbPath = "file.db"
         self.t = database.Transactor("sqlite:///{}".format(self.dbPath))
 
+    @defer.inlineCallbacks
     def tearDown(self):
-        return self.t.shutdown()
-
+        for ip in (ip1, ip2):
+            yield self.t.purgeIP(ip)
+        yield self.t.shutdown()
+    
     def oops(self, failure):
         failure.printDetailedTraceback()
         
@@ -72,25 +86,9 @@ class TestTransactor(tb.TestCase):
             return self.t.setEntry(
                 dt1, 1, values).addCallback(self.assertTrue)
 
-        values = [
-            200, False, ip1,
-            1, # vhost_id
-            1, # url_id
-            1, # ref_id
-            1, # ua_id
-        ]
+        values = makeEntry(200, False, ip1)
         return self.t.setEntry(dt1, 0, values).addCallback(cb1)
 
-    @defer.inlineCallbacks
-    def writeAllRecords(self):
-        for dt, theseRecords in RECORDS.iteritems():
-            for k, thisRecord in enumerate(theseRecords):
-                wasConflict = yield self.t.setEntry(dt, k, thisRecord)
-                self.assertFalse(wasConflict)
-
-    def test_setMultipleEntries(self):
-        return self.writeAllRecords()
-    
     def test_setRecord(self):
         def cb1(null):
             return self.t.getRecord(dt1, 0).addCallback(cb2)
@@ -100,3 +98,30 @@ class TestTransactor(tb.TestCase):
 
         firstRecord = RECORDS[dt1][0]
         return self.t.setRecord(dt1, 0, firstRecord).addCallback(cb1)
+
+    @defer.inlineCallbacks
+    def writeAllRecords(self):
+        for dt, theseRecords in RECORDS.iteritems():
+            for k, thisRecord in enumerate(theseRecords):
+                kNew = yield self.t.setRecord(dt, k, thisRecord)
+                self.assertEqual(kNew, k)
+
+    def test_writeMultipleRecords(self):
+        return self.writeAllRecords()
+
+    @defer.inlineCallbacks
+    def test_writesConflictingRecord(self):
+        yield self.writeAllRecords()
+        cRecord = RECORDS[dt1][0]
+        # Repeat of same record yields same sequence
+        kNew = yield self.t.setRecord(dt1, 0, cRecord)
+        self.assertEqual(kNew, 0)
+        # Change URL and get new sequence
+        cRecord['url'] = "/bogus.html"
+        kNew = yield self.t.setRecord(dt1, 0, cRecord)
+        self.assertNotEqual(kNew, 0)
+        
+
+    
+                    
+

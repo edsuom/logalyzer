@@ -119,6 +119,14 @@ class Transactor(AccessBroker, util.Base):
         """
         Adds all needed database entries for the supplied record at
         the specified datetime-sequence combination dt-k.
+
+        Returns a deferred that fires with a new value of k if there
+        was a conflict with an existing dt-k combination and the new
+        value had to be obtained, or with the old k value if not.
+
+        A conflict exists when there is already an entry for the
+        specified dt-k combination that matches values than the ones
+        in your supplied record.
         """
         if not hasattr(self, 'cm'):
             self.cacheSetup()
@@ -141,8 +149,13 @@ class Transactor(AccessBroker, util.Base):
         if wasPresent:
             # Need to get a new sequence number for this entry instead
             # of k
+            self.msg(
+                "WARNING: Conflicting record in DB for timestamp {} at k={:d}",
+                str(dt), k, "-")
             maxSequence = yield self.getMaxSequence(dt)
-            yield self.setEntry(dt, maxSequence+1, values)
+            k = maxSequence + 1
+            yield self.setEntry(dt, k, values)
+        defer.returnValue(k)
 
     @transact
     def getRecord(self, dt, k):
