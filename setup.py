@@ -10,7 +10,7 @@ setup(
     packages = find_packages(),
     entry_points = {
         'console_scripts': [
-            'sa = statalysis.records:run'],
+            'sa = statalysis.main:run'],
     }
 )
 

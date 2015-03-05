@@ -56,21 +56,21 @@ class TestTransactor(tb.TestCase):
         
     def test_setEntry(self):
         def cb1(result):
-            self.assertTrue(result)
+            self.assertFalse(result)
             self.assertTrue(os.path.isfile(self.dbPath))
             return self.t.setEntry(
                 dt1, 1, values).addCallback(cb2)
 
         def cb2(result):
-            self.assertTrue(result)
+            self.assertFalse(result)
             return self.t.setEntry(
                 dt1, 1, values).addCallback(cb3)
 
         def cb3(result):
-            self.assertTrue(result)
+            self.assertFalse(result)
             values[0] = 404
             return self.t.setEntry(
-                dt1, 1, values).addCallback(self.assertFalse)
+                dt1, 1, values).addCallback(self.assertTrue)
 
         values = [
             200, False, ip1,
@@ -81,9 +81,18 @@ class TestTransactor(tb.TestCase):
         ]
         return self.t.setEntry(dt1, 0, values).addCallback(cb1)
 
+    @defer.inlineCallbacks
+    def writeAllRecords(self):
+        for dt, theseRecords in RECORDS.iteritems():
+            for k, thisRecord in enumerate(theseRecords):
+                wasConflict = yield self.t.setEntry(dt, k, thisRecord)
+                self.assertFalse(wasConflict)
+
+    def test_setMultipleEntries(self):
+        return self.writeAllRecords()
+    
     def test_setRecord(self):
-        def cb1(result):
-            self.assertTrue(result)
+        def cb1(null):
             return self.t.getRecord(dt1, 0).addCallback(cb2)
 
         def cb2(record):

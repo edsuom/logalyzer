@@ -70,19 +70,18 @@ class Transactor(AccessBroker, util.Base):
     def setEntry(self, dt, k, values):
         """
         Adds a new entry to the database for the specified
-        datetime-sequence combination dt-k, complaining if one already
-        exists that is different. See my colNames attribute for the
-        six values you need to supply.
+        datetime-sequence combination dt-k. See my colNames attribute
+        for the six values you need to supply.
 
         Returns a deferred that fires with True if a new entry was
-        added or already present with the same values, False if it was
-        already present but with different values.
+        already present with the different values, False if it was
+        added or already present with the same values.
         """
         def checkExisting(rowValues):
             for k, value in enumerate(rowValues):
                 if value != values[k]:
-                    return False
-            return True
+                    return True
+            return False
 
         row = self._entry(dt, k)
         if row:
@@ -91,7 +90,7 @@ class Transactor(AccessBroker, util.Base):
         for j, name in enumerate(self.colNames):
             kw[name] = values[j]
         self.entries.insert().execute(**kw)
-        return True
+        return False
 
     @transact
     def setNameValue(self, name, value):
@@ -108,6 +107,13 @@ class Transactor(AccessBroker, util.Base):
         rp = table.insert().execute(value=value)
         return rp.lastrowid
 
+    @transact
+    def getMaxSequence(self, dt):
+        if not self.s('max_sequence'):
+            c = self.entries.c
+            self.s([SA.func.max(c.k)], c.dt == SA.bindparam('dt'))
+        return self.s().execute(dt=dt).fetchone()[0]
+    
     @defer.inlineCallbacks
     def setRecord(self, dt, k, record):
         """
@@ -121,16 +127,22 @@ class Transactor(AccessBroker, util.Base):
             valueDict = self.cachedValues[name]
             ID = record[name]
             if self.cm.check(name, ID):
+                # Cached value
                 value = valueDict[ID]
             else:
+                # Get value from DB for value ID
                 value = yield self.setNameValue(name, ID)
                 discardedID = self.cm.set(name, ID)
                 if discardedID in valueDict:
                     del valueDict[discardedID]
                 valueDict[ID] = value
             values.append(value)
-        result = yield self.setEntry(dt, k, values)
-        defer.returnValue(result)
+        wasPresent = yield self.setEntry(dt, k, values)
+        if wasPresent:
+            # Need to get a new sequence number for this entry instead
+            # of k
+            maxSequence = yield self.getMaxSequence(dt)
+            yield self.setEntry(dt, maxSequence+1, values)
 
     @transact
     def getRecord(self, dt, k):
