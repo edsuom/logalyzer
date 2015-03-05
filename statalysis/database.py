@@ -124,7 +124,7 @@ class Transactor(AccessBroker, util.Base):
                 value = valueDict[ID]
             else:
                 value = yield self.setNameValue(name, ID)
-                discardedID = self.cm.set(name, ID, getOldest=True)
+                discardedID = self.cm.set(name, ID)
                 if discardedID in valueDict:
                     del valueDict[discardedID]
                 valueDict[ID] = value
@@ -149,6 +149,18 @@ class Transactor(AccessBroker, util.Base):
                 sh.where(cols.id == ID)
             result[name] = sh().fetchone()[0]
         return result
+
+    @transact
+    def purgeIP(self, ip):
+        """
+        Purges the database of entries with the specified IP address,
+        returning the (deferred) number of rows that were matched and
+        presumably deleted.
+        """
+        rp = self.execute(
+            self.entries.delete().where(self.entries.c.ip == ip))
+        return rp.rowcount
+    
             
                 
                 

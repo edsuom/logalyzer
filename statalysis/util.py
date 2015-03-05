@@ -28,6 +28,10 @@ def rc(*parts):
     return re.compile(rexp)
 
 
+class DeferredException(Exception):
+    pass
+
+
 class CacheManager(object):
     """
     Let me manage a cache or two for you.
@@ -43,7 +47,7 @@ class CacheManager(object):
         """
         if not hasattr(self, 'caches'):
             self.caches = []
-        thisCache = deque([], self.N)
+        thisCache = deque([])
         self.caches.append(thisCache)
         k = len(self.caches) - 1
         if name is None:
@@ -73,23 +77,23 @@ class CacheManager(object):
         k = self._checkIndex(k)
         return bool(self.caches[k].count(x))
 
-    def set(self, k, x, getOldest=False):
+    def set(self, k, x):
         """
         Appends x to cache k, which will result in it being found there if
         checked within N cache misses.
 
         The value least recently added (from a cache miss) will be
-        popped off the other end. It isn't strictly an LRU cache,
-        since a cache hit will be drowned in misses.
+        popped off the other end and returned, in case you want to use
+        it to prune another list somewhere. This isn't strictly an LRU
+        cache, since a cache hit will get drowned in misses.
 
-        If C{getOldest} is set C{True}, the oldest value that was
-        popped off (if one was) will be returned. If nothing was
-        popped off or the keyword is not set, the result will be
-        C{None}.
+        If nothing was popped off because the cache hasn't yet grown
+        to N elements yet, the result will be C{None}.
+
         """
         k = self._checkIndex(k)
         c = self.caches[k]
-        if getOldest and len(c) > self.N:
+        if len(c) >= self.N:
             result = c.pop()
         else:
             result = None
@@ -132,8 +136,12 @@ class Base(object):
             print proto.format(*args)
 
     def oops(self, failure):
-        failure.printDetailedTraceback()
-        
+        maybeReactor = globals().get('reactor', None)
+        if maybeReactor:
+            maybeReactor.stop()
+        raise DeferredException(
+            failure.printDetailedTraceback())
+    
     def csvTextToList(self, text, converter):
         if text:
             return [converter(x.strip()) for x in text.split(',')]

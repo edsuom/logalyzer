@@ -21,7 +21,7 @@ import sift
 
 class RecordKeeper(object):
     """
-    I keep timestamp-keyed log records.
+    I keep timestamp-keyed log records in a dict.
     """
     N_redirects = 50
     secondsInDay = 24 * 60 * 60
@@ -30,7 +30,6 @@ class RecordKeeper(object):
     def __init__(self):
         self.ipList = []
         self.records = {}
-        self.newKeys = []
         self.redirects = OrderedDict()
         
     def isRedirect(self, vhost, ip, http):
@@ -57,27 +56,14 @@ class RecordKeeper(object):
             self.redirects.popitem(last=False)
         return wasRedirect, vhost
 
-    def purgeIP(self, ip):
-        """
-        Purges my records of entries from the supplied IP address and
-        appends the IP to a list to be returned when I'm done so that
-        other instances can purge their records of it, too.
-
-        Any further adds from this IP are ignored.
-
-        Returns True if this was a new IP, False if not.
-
-        """
+    def _purgeFromRecords(self, ip):
         def purgeList():
             while True:
                 ipList = [x['ip'] for x in recordList]
                 if ip not in ipList:
                     return
                 del recordList[ipList.index(ip)]
-
-        if ip in self.ipList:
-            # Already purged
-            return False
+                
         removedKeys = []
         for key, recordList in self.records.iteritems():
             for record in recordList:
@@ -92,17 +78,31 @@ class RecordKeeper(object):
         # Remove keys
         for key in removedKeys:
             self.records.pop(key, None)
+    
+    def purgeIP(self, ip):
+        """
+        Purges my records of entries from the supplied IP address and
+        appends the IP to a list to be returned when I'm done so that
+        other instances can purge their records of it, too.
+
+        Any further adds from this IP are ignored.
+
+        Returns True if this IP was purged (not seen before), False if
+        not.
+
+        If I am running with database persistence, returns a deferred
+        that fires with the value when the database has been updated
+        instead of the value itself.
+        """
+        if ip in self.ipList:
+            # Already purged
+            return False
+        self._purgeFromRecords(ip)
         # Add the IP
         self.ipList.append(ip)
         return True
-        
-    def seconds(self, dt):
-        return self.secondsInDay * dt.toordinal() +\
-            self.secondsInHour * dt.hour +\
-            60 * dt.minute +\
-            dt.second
 
-    def add(self, dt, record, ignoreNewKeys=False):
+    def addRecordToRecords(self, dt, record):
         if record['ip'] in self.ipList:
             # Purged IP, ignore
             return
@@ -115,19 +115,15 @@ class RecordKeeper(object):
         else:
             # First record with this timestamp
             self.records[dt] = [record]
-        # Record was added, include it in the next get
-        if not ignoreNewKeys:
+        # If we are keeping track of records since the last get,
+        # append this as a new datetime key for the next get.
+        if hasattr(self, 'newKeys'):
             self.newKeys.append(dt)
-
-    def addRecords(self, records):
-        for dt, theseRecords in records.iteritems():
-            for thisRecord in theseRecords:
-                self.add(dt, thisRecord, ignoreNewKeys=True)
         
     def clear(self):
         self.newKeys = []
 
-    def get(self):
+    def getRecords(self):
         """
         Returns a list of purged IP addresses and the records added since
         the last clearing
@@ -138,11 +134,83 @@ class RecordKeeper(object):
                 # Not purged and new, so get it
                 newRecords[key] = self.records[key]
         return self.ipList, newRecords
+
+
+class MasterRecordKeeper(RecordKeeper, Base):
+    """
+    I am the master record keeper that gets fed info from the
+    subprocesses. I operate with deferreds; supply a database URL to
+    my constructor and I will do the recordkeeping persistently via
+    that database, too.
+    """
+    def __init__(self, dbURL=None):
+        super(MasterRecordKeeper, self).__init__()
+        if dbURL is None:
+            self.trans = None
+        else:
+            self.trans = database.Transactor(dbURL)
+
+    def shutdown(self):
+        if self.trans is None:
+            return defer.succeed(None)
+        return self.trans.shutdown()
+        
+    def _purgeFromDB(self, ip):
+        def donePurging(N):
+            if N > 0:
+                self.msg("Purged DB of {:d} entries for IP {}", N, ip)
+        
+        if self.trans is None:
+            return defer.succeed(0)
+        # Deleting unwanted entries is a low-priority activity
+        # compared to everything else
+        return self.trans.purgeIP(
+            ip, niceness=10).addCallbacks(donePurging, self.oops)
     
+    def purgeIP(self, ip):
+        """
+        Purges my records (and database, if any) of entries from the
+        supplied IP address and appends the IP to a list to be
+        returned when I'm done so that a master list of purged IP
+        addresses can be provided.
+
+        Any further adds from this IP are ignored.
+        """
+        if ip in self.ipList:
+            # Already purged
+            return
+        # Database purge (happens asynchronously)
+        d = self._purgeFromDB(ip)
+        self._purgeFromRecords(ip)
+        # Add the IP to our purged list
+        self.ipList.append(ip)
+        # Return the deferred for the (eventual) database purge
+        return d
+
+    def addRecordToDB(self, dt, k, record):
+        """
+        """
+        # TODO
+    
+    @defer.inlineCallbacks
+    def addRecords(self, records):
+        for dt, theseRecords in records.iteritems():
+            for k, thisRecord in enumerate(theseRecords):
+                self.addRecordToRecords(dt, thisRecord)
+                yield self.addRecordToDB(dt, k, thisRecord)
+    
+    def getRecords(self):
+        """
+        Returns a list of purged IP addresses and all my records.
+        """
+        return self.ipList, self.records
+
+                
     
 class Parser(Base):
-    """
-    I parse logfile lines to generate timestamp-keyed records
+    """ 
+    I parse logfile lines to generate timestamp-keyed records. Send an
+    instance of me to your processes.
 
     Instantiate me with a dict of matchers (ipMatcher, uaMatcher,
     and/or botMatcher). If you want to exclude any HTTP codes, list
@@ -370,11 +438,12 @@ class Parser(Base):
         self.rk.clear()
         fh = self.file(fileName)
         for line in fh:
+            # This next line is where most of the processing time is spent
             stuff = self.makeRecord(line)
             if stuff:
-                self.rk.add(*stuff)
+                self.rk.addRecordToRecords(*stuff)
         fh.close()
-        return self.rk.get()
+        return self.rk.getRecords()
 
     
 class Reader(Base):
@@ -382,13 +451,12 @@ class Reader(Base):
     I read and parse web server log files
     """
     def __init__(
-            self, logDir, rules={},
-            vhost=None, exclude=[],
-            ignoreSecondary=False,
-            cores=None, verbose=False):
+            self, logDir, dbURL=None,
+            rules={}, vhost=None, exclude=[],
+            ignoreSecondary=False, cores=None, verbose=False):
         #----------------------------------------------------------------------
         self.myDir = logDir
-        self.rk = RecordKeeper()
+        self.rk = MasterRecordKeeper(dbURL)
         matchers = {}
         for matcherName, ruleList in rules.iteritems():
             thisMatcher = getattr(sift, matcherName)(ruleList)
@@ -402,29 +470,32 @@ class Reader(Base):
         else:
             cores = int(cores)
         self.q = ProcessQueue(cores, parser=parser)
+        reactor.addSystemEventTrigger('before', 'shutdown', self.shutdown)
         if verbose:
             self.verbose = True
 
-    def _oops(self, failure):
-        failure.raiseException()
-        reactor.stop()
-
+    def shutdown(self):
+        dList = [self.q.shutdown(), self.rk.shutdown()]
+        return defer.DeferredList(dList)
+            
     def run(self):
         """
         Runs everything via the process queue (multiprocessing!),
         returning a reference to my main-process recordkeeper with all
         the results in it.
         """
+        @defer.inlineCallbacks
         def gotSomeResults(results, fileName):
             ipList, records = results
             self.msg(" {}: {:d} purged IPs, {:d} records".format(
                 fileName, len(ipList), len(records)))
             for ip in ipList:
-                self.rk.purgeIP(ip)
-            self.rk.addRecords(records)
+                yield self.rk.purgeIP(ip)
+            yield self.rk.addRecords(records)
 
         def allDone(null):
-            return self.q.shutdown().addBoth(lambda _ : self.rk)
+            reactor.stop()
+            return self.rk.get()
         
         dList = []
         for fileName in self.filesInDir():
@@ -434,9 +505,9 @@ class Reader(Base):
             d = self.q.call(
                 'parser', self.pathInDir(fileName))
             d.addCallback(gotSomeResults, fileName)
-            d.addErrback(self._oops)
+            d.addErrback(self.oops)
             dList.append(d)
-        return defer.DeferredList(dList).addCallbacks(allDone, self._oops)
+        return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
 
         
             
