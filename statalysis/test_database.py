@@ -52,8 +52,6 @@ def makeEntry(http, was_rd, ip, *ids):
     return result
 
 
-
-
 class TestTransactor(tb.TestCase):
     def setUp(self):
         self.dbPath = "file.db"
@@ -65,9 +63,6 @@ class TestTransactor(tb.TestCase):
             yield self.t.purgeIP(ip)
         yield self.t.shutdown()
     
-    def oops(self, failure):
-        failure.printDetailedTraceback()
-        
     def test_setEntry(self):
         def cb1(result):
             self.assertFalse(result)
@@ -120,8 +115,3 @@ class TestTransactor(tb.TestCase):
         cRecord['url'] = "/bogus.html"
         kNew = yield self.t.setRecord(dt1, 0, cRecord)
         self.assertNotEqual(kNew, 0)
-        
-
-    
-                    
-

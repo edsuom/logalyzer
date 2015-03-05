@@ -84,6 +84,7 @@ class Parser(Base):
         for callableName, matcherName in self.matcherTable:
             if matcherName in matchers:
                 setattr(self, callableName, matchers[matcherName])
+        from records import ParserRecordKeeper
         self.rk = ParserRecordKeeper()
         self.vhost = vhost
         self.exclude = exclude
@@ -267,6 +268,7 @@ class Reader(Base):
             ignoreSecondary=False, cores=None, verbose=False):
         #----------------------------------------------------------------------
         self.myDir = logDir
+        from records import MasterRecordKeeper
         self.rk = MasterRecordKeeper(dbURL)
         matchers = {}
         for matcherName, ruleList in rules.iteritems():

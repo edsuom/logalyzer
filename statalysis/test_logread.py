@@ -21,27 +21,6 @@ ip1 = "221.127.9.141"
 ip2 = "82.132.214.244"
 
 
-class TestRecordKeeper(tb.TestCase):
-    
-    def setUp(self):
-        self.rk = logread.RecordKeeper()
-
-    def test_isRedirect(self):
-        wasRD, vhost = self.rk.isRedirect("foo.com", ip1, 200)
-        self.assertFalse(wasRD)
-        self.assertEqual(vhost, "foo.com")
-        wasRD, vhost = self.rk.isRedirect("foo.com", ip2, 302)
-        self.assertFalse(wasRD)
-        self.assertEqual(vhost, "foo.com")
-        for k in xrange(10):
-            wasRD, vhost = self.rk.isRedirect("bar.com", ip2, 200)
-            self.assertTrue(wasRD)
-            self.assertEqual(vhost, "foo.com")
-        wasRD, vhost = self.rk.isRedirect("bar.com", ip1, 200)
-        self.assertFalse(wasRD)
-        self.assertEqual(vhost, "bar.com")
-        
-
 class TestParser(tb.TestCase):
     def setUp(self):
         self.p = logread.Parser({})
@@ -153,12 +132,12 @@ class TestReader(tb.TestCase):
             if isinstance(result, failure.Failure):
                 result.raiseException()
             else:
-                rk = result
-                self.assertIsInstance(rk.ipList, list)
-                self.assertTrue(len(rk.ipList) > 1)
-                self.assertIsInstance(rk.records, dict)
-                self.assertTrue(len(rk.records) > 100)
+                ipList, records = result
+                self.assertIsInstance(ipList, list)
+                self.assertTrue(len(ipList) > 1)
+                self.assertIsInstance(records, dict)
+                self.assertTrue(len(records) > 100)
         
         return self.r.run().addBoth(done)
-        
+
             
