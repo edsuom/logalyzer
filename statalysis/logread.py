@@ -326,7 +326,9 @@ class Reader(Base):
             if 'access.log' not in fileName:
                 continue
             d = self.q.call(
-                'parser', self.pathInDir(fileName))
+                'parser', self.pathInDir(fileName),
+                timeout=60*10 # 10 minute timeout per file
+            )
             d.addCallback(gotSomeResults, fileName)
             d.addErrback(self.oops)
             dList.append(d)

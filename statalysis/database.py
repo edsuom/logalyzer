@@ -14,6 +14,41 @@ from sasync.database import transact, SA, AccessBroker
 import util
 
 
+class DTK(object):
+    """
+    """
+    units = ['year', 'month', 'day', 'hour', 'minute']
+
+    def __init__(self, rows):
+        self.x = {}
+        for dtThis, kThis in rows:
+            self.set(dtThis, kThis)
+
+    def check(self, dt, k):
+        """
+        """
+        stuff = self.x
+        for unitVal in [getattr(dt, x) for x in self.units]:
+            if unitVal not in stuff:
+                return False
+            stuff = stuff[unitVal]
+        return (k in stuff)
+
+    def set(self, dt, k):
+        """
+        """
+        stuff = self.x
+        unitList = [getattr(dt, x) for x in self.units]
+        for unitName in self.units:
+            unitVal = getattr(dt, unitName)
+            if unitName == 'minute': 
+                stuff = stuff.setdefault(unitVal, [])
+            else:
+                stuff = stuff.setdefault(unitVal, {})
+        if k not in stuff:
+            stuff.append(k)
+
+
 class Transactor(AccessBroker, util.Base):
     """
     I handle transactions for an efficient database of logfile
@@ -57,7 +92,7 @@ class Transactor(AccessBroker, util.Base):
                 SA.Column('value', SA.String(255)),
             )
 
-    def _entry(self, dt, k):
+    def getEntry(self, dt, k):
         col = self.entries.c
         if not self.s('s_entry'):
             cList = [getattr(col, x) for x in self.colNames]
@@ -84,13 +119,25 @@ class Transactor(AccessBroker, util.Base):
                     return True
             return False
 
-        row = self._entry(dt, k)
-        if row:
-            return checkExisting(row)
+        if not hasattr(self, 'dtk'):
+            col = self.entries.c
+            for sh in self.selectorator(col.dt, col.k):
+                pass
+            rows = sh().fetchall()
+            self.dtk = DTK(rows)
+        if self.dtk.check(dt, k):
+            # There appears to be a dt-k entry already...
+            row = self.getEntry(dt, k)
+            if row:
+                # ... yes, indeed; check it
+                return checkExisting(row)
+            # ... no, we must have purged it. No biggie.
+        # Insert new entry
         kw = {'dt': dt, 'k': k}
         for j, name in enumerate(self.colNames):
             kw[name] = values[j]
         self.entries.insert().execute(**kw)
+        self.dtk.set(dt, k)
         return False
 
     @transact
@@ -148,7 +195,7 @@ class Transactor(AccessBroker, util.Base):
             values.append(ID)
         wasPresent = yield self.setEntry(dt, k, values)
         if wasPresent:
-            # Need to get a new sequence number for this entry
+        # Need to get a new sequence number for this entry
             maxSequence = yield self.getMaxSequence(dt)
             k = maxSequence + 1
             yield self.setEntry(dt, k, values)
@@ -161,7 +208,7 @@ class Transactor(AccessBroker, util.Base):
         datetime-sequence combination dt-k.
         """
         result = {}
-        row = list(self._entry(dt, k))
+        row = list(self.getEntry(dt, k))
         for j, name in enumerate(self.directValues):
             result[name] = row[j]
         for j, name in enumerate(self.indexedValues):

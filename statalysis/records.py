@@ -163,7 +163,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
             self.trans = database.Transactor(dbURL, echo=echo)
             self.verbose = warnings
         self.pk = 0
-
+    
     def shutdown(self):
         if self.trans is None:
             return defer.succeed(None)
