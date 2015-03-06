@@ -28,7 +28,8 @@ class Transactor(AccessBroker, util.Base):
         """
         Sets up caches for values written to the indexed value tables
         """
-        self.cm = util.CacheManager()
+        # We uses huge caches because DB access is so slow
+        self.cm = util.CacheManager(200)
         self.cachedValues = {}
         for name in self.indexedValues:
             self.cm.new(name)
@@ -138,8 +139,8 @@ class Transactor(AccessBroker, util.Base):
                 # Cached ID
                 ID = valueDict[value]
             else:
-                # Get ID from DB for value
-                ID = yield self.setNameValue(name, value)
+                # Get ID from DB for value, at higher priority
+                ID = yield self.setNameValue(name, value, niceness=-15)
                 discardedValue = self.cm.set(name, value)
                 if discardedValue in valueDict:
                     del valueDict[discardedValue]
