@@ -10,6 +10,8 @@ Copyright (C) 2014-2015 Tellectual LLC
 import re, os, os.path
 from collections import deque
 
+from twisted.internet import defer
+
 
 def rdb(sep, *args):
     """
@@ -107,6 +109,19 @@ class CacheManager(object):
         return result
 
 
+class BogusQueue(object):
+    def __init__(self, **kw):
+        for name, value in kw.iteritems():
+            setattr(self, name, value)
+
+    def call(self, fName, *args, **kw):
+        f = getattr(self, fName)
+        return defer.succeed(f(*args))
+
+    def shutdown(self):
+        return defer.suceed(None)
+
+    
 class Base(object):
     """
     Subclass me to have a few convenient methods and easily work with
@@ -134,8 +149,10 @@ class Base(object):
             dt.year, dt.month, dt.day,
             dt.hour, dt.minute)
         
-    def msg(self, proto, *args):
+    def msg(self, proto, *args, **kw):
         if self.verbose:
+            if not kw.get('noLeadingNewline', False):
+                proto = "\n" + proto
             if args and args[-1].startswith('-'):
                 args = list(args[:-1]) + ["-"*70]
                 proto += "\n{}"
@@ -150,7 +167,7 @@ class Base(object):
                 pass
         contextInfo = ": "+args[0].format(*args[1:]) if args else ""
         print "\nFAILURE in {}{}".format(repr(self), contextInfo)
-        failure.raiseException()
+        failure.printDetailedTraceback()
     
     def csvTextToList(self, text, converter):
         if text:

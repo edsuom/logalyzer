@@ -217,7 +217,7 @@ class Parser(Base):
         # addresses (useful if -i option set)
         if self.botMatcher(ip, url) or self.refMatcher(ip, ref):
             if self.rk.purgeIP(ip):
-                self.msg(line)
+                self.msg(line, noLeadingNewline=True)
             return
         if self.exclude:
             if http in self.exclude:
@@ -250,15 +250,16 @@ class Parser(Base):
         self.rk.clear()
         fh = self.file(fileName)
         for line in fh:
-            # This next line is where most of the processing time is spent
             try:
+                # This next line is where most of the processing time is spent
                 stuff = self.makeRecord(line)
             except:
                 import sys, traceback
                 eType, eValue = sys.exc_info()[:2]
-                print "\nERROR {}: '{}'\n when parsing logfile '{}':\n{}\n".format(
+                print "ERROR {}: '{}'\n when parsing logfile '{}':\n{}\n".format(
                     eType.__name__, eValue, fileName, line)
                 traceback.print_tb(sys.exc_info()[2])
+                fh.close()
                 return
             if stuff:
                 self.rk.addRecordToRecords(*stuff)
@@ -270,10 +271,12 @@ class Reader(Base):
     """
     I read and parse web server log files
     """
+    bogusQueue = False
+    
     def __init__(
             self, logDir, dbURL=None,
             rules={}, vhost=None, exclude=[], ignoreSecondary=False,
-            cores=None, verbose=False, warnings=False):
+            cores=None, verbose=False, info=False, warnings=False):
         #----------------------------------------------------------------------
         self.myDir = logDir
         from records import MasterRecordKeeper
@@ -283,21 +286,27 @@ class Reader(Base):
             thisMatcher = getattr(sift, matcherName)(ruleList)
             matchers[matcherName] = thisMatcher
         parser = Parser(
-            matchers, vhost, exclude, ignoreSecondary, verbose)
-        #self.q = BogusQueue(parser=parser)
-        if cores is None:
-            import multiprocessing as mp
-            cores = mp.cpu_count() - 1
+            matchers, vhost, exclude, ignoreSecondary, verbose=info)
+        if self.bogusQueue:
+            self.q = BogusQueue(parser=parser)
         else:
-            cores = int(cores)
-        self.q = ProcessQueue(cores, parser=parser)
-        reactor.addSystemEventTrigger('before', 'shutdown', self.shutdown)
+            if cores is None:
+                import multiprocessing as mp
+                cores = mp.cpu_count() - 1
+            else:
+                cores = int(cores)
+            self.q = ProcessQueue(cores, parser=parser)
         if verbose:
             self.verbose = True
 
-    def shutdown(self):
-        dList = [self.q.shutdown(), self.rk.shutdown()]
-        return defer.DeferredList(dList)
+    @defer.inlineCallbacks
+    def done(self, null):
+        self.msg("Shutting down processes...")
+        yield self.q.shutdown()
+        self.msg("Shutting down master recordkeeper...")
+        yield self.rk.shutdown()
+        self.msg("Shutdowns complete", "-")
+        defer.returnValue(self.rk.getStuff())
             
     def run(self):
         """
@@ -307,30 +316,32 @@ class Reader(Base):
         """
         @defer.inlineCallbacks
         def gotSomeResults(results, fileName):
-            if results is None:
-                reactor.stop()
-            else:
+            if results:
                 ipList, records = results
-                self.msg("\n{}: {:d} purged IPs, {:d} records".format(
+                self.msg("{}: {:d} purged IPs, {:d} records".format(
                     fileName, len(ipList), len(records)))
                 for ip in ipList:
-                    yield self.rk.purgeIP(ip)
-                yield self.rk.addRecords(records)
-
-        def allDone(null):
-            reactor.stop()
-            return self.rk.getStuff()
+                    yield self.rk.purgeIP(ip).addErrback(
+                        self.oops, "Trying to purge IP {}", ip)
+                yield self.rk.addRecords(records).addErrback(
+                    self.oops, "Trying to add records for {}", fileName)
+                defer.returnValue(True)
+            else:
+                # Retry
+                self.msg("RETRY: {}", fileName, "-")
+                yield dispatch(fileName)
+        
+        def dispatch(fileName):
+            d = self.q.call(
+                'parser', self.pathInDir(fileName), timeout=60*10)
+            d.addCallback(gotSomeResults, fileName)
+            d.addErrback(self.oops, "Parsing of '{}'", fileName)
+            return d
         
         dList = []
         for fileName in self.filesInDir():
             if 'access.log' not in fileName:
                 continue
-            d = self.q.call(
-                'parser', self.pathInDir(fileName),
-                timeout=60*10 # 10 minute timeout per file
-            )
-            d.addCallback(gotSomeResults, fileName)
-            d.addErrback(self.oops)
-            dList.append(d)
-        return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
+            dList.append(dispatch(fileName))
+        return defer.DeferredList(dList).addCallbacks(self.done, self.oops)
     

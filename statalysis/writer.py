@@ -3,106 +3,6 @@
 # UTF-8. That’s cool!
 
 """
-NAME
-statalysis: Analyzes web server log files
-
-
-SYNOPSIS
-sa [--vhost somehost.com]
-   [-p] [-e, --exclude http1,http2,...]
-   [-d, --ruledir <directory of rule files>]
-     [-i, --ip  [xX]|rule1,rule2,...]
-     [-n, --net [xX]|rule1,rule2,...]
-     [-u, --ua  [xX]|rule1,rule2,...]
-     [-b, --bot [xX]|rule1,rule2,...]
-     [-r, --ref [xX]|rule1,rule2,...]
-   [--omit] [-y, --secondary]
-   [-s, --save <file to save purged IPs>]
-   [-v, --verbose]
-<file> <file...>
-
-
-DESCRIPTION
-
-Analyzes log files in the directory where outFile is to go, producing
-one or more output <files> (except if -c option set).
-
-The format of the output files is determined by their extension:
-
-.csv: Comma-separated (actually tabs) values, one row for each record
-.db:  SQLite database of records saved as sAsync persistent dictionary
-
-
-Specify particular ip, net, ua, bot, or ref rules in the rules
-directory with a comma-separated list after the -i, -n, -u, -b, or -r
-option. Use x or X to skip all such rules. Omit the option to use all
-pertinent rules in the rules directory.
-
-All records from IP addresses with bot behavior will be purged.
-
-WARNING: If any of your bot-detecting rules that purge IP addresses
-(bot, ref) match innocent search engines, e.g., with a url match to
-'/robots.txt', don't use the saved list (--save) to block access to
-your web server!
-
-
-OPTIONS
-
---vhost vhost
-A particular virtual host of interest
-
--p, --print
-Print records after loading
-
--e, --exclude exclude
-Exclude HTTP code(s) (comma separated list, no spaces)
-
--d, --ruledir ruledir
-Directory for .net, .ua, and .url file(s) containing IP, user-agent,
-and url exclusion rules
-
--i, --ip rules
-Rules corresponding to .ip files in ruledir containing IP addresses
-aaa.bbb.ccc.ddd notation
-
--n, --net rules
-Rules corresponding to .net files in ruledir containing IP network
-exclusion rules in aaa.bbb.ccc.ddd/ee notation
-
--u, --ua rules
-Rules corresponding to .ua files containing regular expressions (case
-sensitive) that match User-Agent strings to exclude
-
--b, --bot rules
-Rules corresponding to .url files containing regular expressions (case
-sensitive) that match url strings indicating a malicious bot
-
--r, --referrer rules
-Rules corresponding to .ref files containing regular expressions (case
-sensitive) that match referrer strings indicating a malicious bot
-
---omit
-Omit the user-agent string from the records
-
--y, --secondary
-Ignore secondary files (css, webfonts, images)
-
--s, --save file
-File in which to save a list of the purged (or consolidated) IP
-addresses, in ascending numerical order with repeats omitted.
-
--c, --consolidate
-Just consolidate IP addresses in the <file> with those in the ip rules
-(-i), saving that to the file specified with -s. Ignores logfiles and
-net, ua, bot, and ref rules, and doesn't generate any csv file
-
---cores N
-The number of CPU cores (really, python processes) to run in parallel
-
--v, --verbose
-Run verbosely
-
-
 LICENSE
 Copyright (C) 2015 Tellectual LLC
 """
@@ -197,7 +97,7 @@ class Writer(Base):
         """
         keys = sorted(records.keys())
         for dt in keys:
-            self.msg("\n{}", self.dtFormat(dt), "-")
+            self.msg("{}", self.dtFormat(dt), "-")
             theseRecords = records[dt]
             for k, thisRecord in enumerate(theseRecords):
                 self.msg("{:3d}: {}", k, thisRecord)

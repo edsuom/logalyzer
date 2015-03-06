@@ -153,7 +153,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
     my constructor and I will do the recordkeeping persistently via
     that database, too.
     """
-    progressChars = "xo+XO"
+    progressChars = "1234567890"
 
     def __init__(self, dbURL=None, warnings=False, echo=False):
         super(MasterRecordKeeper, self).__init__()
@@ -167,9 +167,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
     def shutdown(self):
         if self.trans is None:
             return defer.succeed(None)
-        self.msg("Shutting down master recordkeeper...")
-        return self.trans.shutdown().addCallback(
-            lambda _ : self.msg("  ...shutdown complete"))
+        return self.trans.shutdown()
     
     def _purgeFromDB(self, ip):
         def donePurging(N):
@@ -217,7 +215,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
         def done(kNew):
             if kNew != k:
                 self.msg(
-                    "\nWARNING: Conflicting record in DB: " +\
+                    "WARNING: Conflicting record in DB: " +\
                     "Timestamp {}, was at k={:d}, written as k={:d}",
                     str(dt), k, kNew, "-")
         
@@ -233,7 +231,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
 
         N = 0
         pc = progressChar()
-        self.msg("\nAdding '{}' records:", pc)
+        self.msg("Adding '{}' records:", pc)
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
                 self.addRecordToRecords(dt, thisRecord)
@@ -243,7 +241,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
                     if self.verbose:
                         print pc,
                         N += 1
-        self.msg("\nAdded {:d} '{}' Records", N, pc, "-")
+        self.msg("Added {:d} '{}' Records", N, pc, "-")
     
     def getStuff(self):
         """

@@ -106,6 +106,9 @@ The number of CPU cores (really, python processes) to run in parallel
 -v, --verbose
 Run verbosely
 
+--info
+Provide info about IP records being purged
+
 -w, --warn
 Provide database transaction info
 
@@ -130,13 +133,13 @@ class RuleReader(Base):
         self.verbose = verbose
     
     def linerator(self, filePath):
-        self.msg("Reading '{}'...", filePath, '-')
+        self.msg("Reading '{}'...", filePath, '-', noLeadingNewline=True)
         fh = open(filePath, 'rb')
         for line in fh:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            self.msg("| {}", line)
+            self.msg("| {}", line, noLeadingNewline=True)
             yield line
         self.msg("")
         fh.close()
@@ -207,7 +210,8 @@ class Recorder(Base):
         rulesDir = self.opt['d']
         if rulesDir is None:
             rulesDir = self.myDir
-        self.msg("Loading rules from '{}'", rulesDir, '-')
+        self.msg(
+            "Loading rules from '{}'", rulesDir, '-', noLeadingNewline=True)
         rules = {}
         rr = RuleReader(rulesDir, self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
@@ -226,19 +230,22 @@ class Recorder(Base):
         rules = self.loadRules()
         self.msg("Exclusions", '-')
         exclude = self.csvTextToList(self.opt['e'], int)
-        self.msg("| HTTP Codes: {}", ", ".join([str(x) for x in exclude]))
+        self.msg(
+            "| HTTP Codes: {}", ", ".join([str(x) for x in exclude]),
+            noLeadingNewline=True)
         return logread.Reader(
             self.myDir,
             dbURL=self.opt['db'],
             rules=rules, vhost=self.opt['vhost'],
             exclude=exclude, ignoreSecondary=self.opt['y'],
             cores=self.opt['cores'],
-            verbose=self.verbose, warnings=self.opt['w'])
+            verbose=self.verbose, info=self.opt['info'], warnings=self.opt['w'])
 
-    def _doneReading(self, ipList, records):
+    def _doneReading(self, stuff):
         """
         Callback to process an ipList and records returned from my reader.
         """
+        ipList, records = stuff
         # Save the IP addresses from purges if that option set
         filePath = self.opt['s']
         if filePath:
