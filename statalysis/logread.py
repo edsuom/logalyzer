@@ -165,7 +165,7 @@ class Parser(Base):
         match = self.reCLF.match(line)
         if match is None:
             return
-        result = list(match.group(2, 1))
+        result = [match.group(2).lower(), match.group(1)]
         if dt is None:
             dt = self.parseDatetimeBlock(match.group(3))
         result.extend([dt, match.group(5), int(match.group(6))])
@@ -251,7 +251,15 @@ class Parser(Base):
         fh = self.file(fileName)
         for line in fh:
             # This next line is where most of the processing time is spent
-            stuff = self.makeRecord(line)
+            try:
+                stuff = self.makeRecord(line)
+            except:
+                import sys, traceback
+                eType, eValue = sys.exc_info()[:2]
+                print "\nERROR {}: '{}'\n when parsing logfile '{}':\n{}\n".format(
+                    eType.__name__, eValue, fileName, line)
+                traceback.print_tb(sys.exc_info()[2])
+                return
             if stuff:
                 self.rk.addRecordToRecords(*stuff)
         fh.close()
@@ -264,12 +272,12 @@ class Reader(Base):
     """
     def __init__(
             self, logDir, dbURL=None,
-            rules={}, vhost=None, exclude=[],
-            ignoreSecondary=False, cores=None, verbose=False):
+            rules={}, vhost=None, exclude=[], ignoreSecondary=False,
+            cores=None, verbose=False, warnings=False):
         #----------------------------------------------------------------------
         self.myDir = logDir
         from records import MasterRecordKeeper
-        self.rk = MasterRecordKeeper(dbURL)
+        self.rk = MasterRecordKeeper(dbURL, warnings=warnings)
         matchers = {}
         for matcherName, ruleList in rules.iteritems():
             thisMatcher = getattr(sift, matcherName)(ruleList)
@@ -299,12 +307,15 @@ class Reader(Base):
         """
         @defer.inlineCallbacks
         def gotSomeResults(results, fileName):
-            ipList, records = results
-            self.msg(" {}: {:d} purged IPs, {:d} records".format(
-                fileName, len(ipList), len(records)))
-            for ip in ipList:
-                yield self.rk.purgeIP(ip)
-            yield self.rk.addRecords(records)
+            if results is None:
+                reactor.stop()
+            else:
+                ipList, records = results
+                self.msg("\n{}: {:d} purged IPs, {:d} records".format(
+                    fileName, len(ipList), len(records)))
+                for ip in ipList:
+                    yield self.rk.purgeIP(ip)
+                yield self.rk.addRecords(records)
 
         def allDone(null):
             reactor.stop()
@@ -314,13 +325,10 @@ class Reader(Base):
         for fileName in self.filesInDir():
             if 'access.log' not in fileName:
                 continue
-            self.msg(fileName)
             d = self.q.call(
                 'parser', self.pathInDir(fileName))
             d.addCallback(gotSomeResults, fileName)
             d.addErrback(self.oops)
             dList.append(d)
         return defer.DeferredList(dList).addCallbacks(allDone, self.oops)
-
-        
-            
+    

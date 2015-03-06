@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # UTF-8. That’s cool!
 
+from datetime import datetime as dt
 
 import re, os, os.path, shutil, inspect, atexit
 
@@ -294,6 +295,30 @@ logitec\.se
 /trackback/?$
 """.split('\n')
 
+dt1 = dt(2015, 2, 20, 12, 2, 49)
+dt2 = dt(2015, 3, 2, 21, 17, 16)
+
+ip1 = "171.127.9.141"
+ip2 = "32.132.214.244"
+
+RECORDS = {
+    dt1: [
+        {'vhost': "foo.com",
+         'ip': ip1, 'http': 200, 'was_rd': False,
+         'url': "/", 'ref': "-", 'ua': "-"},
+        {'vhost': "foo.com",
+         'ip': ip1, 'http': 200, 'was_rd': False,
+         'url': "/image.png", 'ref': "-", 'ua': "-"}],
+    dt2: [
+        {'vhost': "bar.com",
+         'ip': ip2, 'http': 404, 'was_rd': False,
+         'url': "/", 'ref': "-", 'ua': "-"}],
+    }
+
+months = ["2", "2", "3"]
+vhosts = ["foo.com", "foo.com", "bar.com"]
+ips = [ip1, ip1, ip2]
+
 
 class Bogus:
     pass
@@ -520,3 +545,10 @@ class TestCase(unittest.TestCase):
                 msg += "\nFrom #1: '{}'\nFrom #2: '{}'".format(s1, s2)
                 self.fail(msg)
 
+    def assertItemsEqual(self, a, b, msg=""):
+        self.assertEqual(
+            len(a), len(b), "A and B don't even have equal length!")
+        for k, aItem in enumerate(a):
+            self.assertEqual(
+                aItem, b[k],
+                "Items {:d} differ:".format(k))

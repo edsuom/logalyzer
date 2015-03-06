@@ -133,25 +133,21 @@ class Transactor(AccessBroker, util.Base):
         values = [record[x] for x in ('http', 'was_rd', 'ip')]
         for name in self.indexedValues:
             valueDict = self.cachedValues[name]
-            ID = record[name]
-            if self.cm.check(name, ID):
-                # Cached value
-                value = valueDict[ID]
+            value = record[name]
+            if self.cm.check(name, value) and value in valueDict:
+                # Cached ID
+                ID = valueDict[value]
             else:
-                # Get value from DB for value ID
-                value = yield self.setNameValue(name, ID)
-                discardedID = self.cm.set(name, ID)
-                if discardedID in valueDict:
-                    del valueDict[discardedID]
-                valueDict[ID] = value
-            values.append(value)
+                # Get ID from DB for value
+                ID = yield self.setNameValue(name, value)
+                discardedValue = self.cm.set(name, value)
+                if discardedValue in valueDict:
+                    del valueDict[discardedValue]
+                valueDict[value] = ID
+            values.append(ID)
         wasPresent = yield self.setEntry(dt, k, values)
         if wasPresent:
-            # Need to get a new sequence number for this entry instead
-            # of k
-            self.msg(
-                "WARNING: Conflicting record in DB for timestamp {} at k={:d}",
-                str(dt), k, "-")
+            # Need to get a new sequence number for this entry
             maxSequence = yield self.getMaxSequence(dt)
             k = maxSequence + 1
             yield self.setEntry(dt, k, values)
@@ -186,7 +182,25 @@ class Transactor(AccessBroker, util.Base):
             self.entries.delete().where(self.entries.c.ip == ip))
         return rp.rowcount
     
-            
+    @transact
+    def hits(self, year, month, vhost):
+        """
+        Returns the number of visitors (unique IP addresses) during the
+        specified year and month for a particular vhost.
+        """
+        # TODO
+
+    @transact
+    def hitsForIP(self, ip):
+        """
+        Returns the number of entries for the specified IP address
+        """
+        cols = self.entries.c
+        for sh in self.selectorator(SA.func.count(cols.http)):
+            sh.where(cols.ip == ip)
+        return sh().fetchone()[0]
+
+
                 
                 
             

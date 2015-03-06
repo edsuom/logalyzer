@@ -220,14 +220,6 @@ class Writer(Base):
     
     def _writePYO(self, dt, k, record):
         marshal.dump([self.dtFormat(dt), k, record], self._fhPYO)
-
-    def _setupDB(self, filePath):
-        self._t = database.Transactor(
-            "sqlite:///{}".format(filePath))
-        return self._t.shutdown
-
-    def _writeDB(self, dt, k, record):
-        return self._t.setRecord(dt, k, record)
             
     def write(self, records):
         """

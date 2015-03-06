@@ -134,18 +134,3 @@ class TestWriter(tb.TestCase):
         pyoPath = tb.tempFiles(tb.fileInModuleDir("file.pyo"))[0]
         self.w.writeTypes['PYO'] = pyoPath
         return self.w.write(RECORDS).addCallback(done)
-
-    def test_write_db(self):
-        @defer.inlineCallbacks
-        def done(null):
-            self.assertTrue(os.path.isfile(dbPath))
-            t = database.Transactor("sqlite:///{}".format(dbPath))
-            record = yield t.getRecord(dt1, 0)
-            self.assertEqual(len(record), 7)
-            self.assertFalse(record['was_rd'])
-            self.assertEqual(record['ip'], ips[0])
-            self.assertEqual(record['vhost'], vhosts[0])
-            
-        dbPath = "file.db"
-        self.w.writeTypes['DB'] = dbPath
-        return self.w.write(RECORDS).addCallback(done)

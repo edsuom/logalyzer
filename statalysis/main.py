@@ -57,6 +57,10 @@ A particular virtual host of interest
 -p, --print
 Print records after loading
 
+--db dburl
+Specify the RFC-1738 url of a database for the records and it will be
+updated as the logfiles are parsed.
+
 -e, --exclude exclude
 Exclude HTTP code(s) (comma separated list, no spaces)
 
@@ -101,6 +105,9 @@ The number of CPU cores (really, python processes) to run in parallel
 
 -v, --verbose
 Run verbosely
+
+-w, --warn
+Provide database transaction info
 
 
 LICENSE
@@ -221,24 +228,24 @@ class Recorder(Base):
         exclude = self.csvTextToList(self.opt['e'], int)
         self.msg("| HTTP Codes: {}", ", ".join([str(x) for x in exclude]))
         return logread.Reader(
-            self.myDir, rules,
-            vhost=self.opt['vhost'],
-            exclude=exclude,
-            ignoreSecondary=self.opt['y'],
+            self.myDir,
+            dbURL=self.opt['db'],
+            rules=rules, vhost=self.opt['vhost'],
+            exclude=exclude, ignoreSecondary=self.opt['y'],
             cores=self.opt['cores'],
-            verbose=self.verbose)
+            verbose=self.verbose, warnings=self.opt['w'])
 
-    def _doneReading(self, rk):
+    def _doneReading(self, ipList, records):
         """
-        Callback to process records returned from my reader
+        Callback to process an ipList and records returned from my reader.
         """
         # Save the IP addresses from purges if that option set
         filePath = self.opt['s']
         if filePath:
-            self.w.writeIPs(rk.ipList, filePath)
+            self.w.writeIPs(ipList, filePath)
         # Now write the actual records, returning the deferred from
         # the writer
-        return self.w.write(rk.records)
+        return self.w.write(records)
         
     def load(self):
         def allDone(null):

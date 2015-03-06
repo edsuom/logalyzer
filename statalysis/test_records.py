@@ -11,18 +11,13 @@ import os.path
 from datetime import datetime as dt
 
 from twisted.python import failure
+from twisted.internet import defer
 
-import testbase as tb
-
+from testbase import *
 import records
 
 
-ip1 = "221.127.9.141"
-ip2 = "82.132.214.244"
-
-
-class TestParserRecordKeeper(tb.TestCase):
-    
+class TestParserRecordKeeper(TestCase):
     def setUp(self):
         self.rk = records.ParserRecordKeeper()
 
@@ -40,3 +35,30 @@ class TestParserRecordKeeper(tb.TestCase):
         wasRD, vhost = self.rk.isRedirect("bar.com", ip1, 200)
         self.assertFalse(wasRD)
         self.assertEqual(vhost, "bar.com")
+
+
+class TestMasterRecordKeeper(TestCase):
+    def setUp(self):
+        self.dbPath = "records.db"
+        self.rk = records.MasterRecordKeeper(
+            "sqlite:///{}".format(self.dbPath),
+            warnings=True,
+        )
+        self.t = self.rk.trans
+    
+    @defer.inlineCallbacks
+    def tearDown(self):
+        for ip in (ip1, ip2):
+            yield self.t.purgeIP(ip)
+        yield self.rk.shutdown()
+        
+    @defer.inlineCallbacks
+    def test_addRecords(self):
+        yield self.rk.addRecords(RECORDS)
+        self.failUnlessEqual(self.rk.records, RECORDS)
+        N = yield self.t.hitsForIP(ip1)
+        self.failUnlessEqual(N, 2)
+        
+            
+
+    

@@ -28,6 +28,9 @@ def rc(*parts):
     return re.compile(rexp)
 
 
+class ProcessError(Exception):
+    pass
+
 class DeferredException(Exception):
     pass
 
@@ -83,18 +86,21 @@ class CacheManager(object):
         checked within N cache misses.
 
         The value least recently added (from a cache miss) will be
-        popped off the other end and returned, in case you want to use
-        it to prune another list somewhere. This isn't strictly an LRU
-        cache, since a cache hit will get drowned in misses.
+        popped off the other end and returned, unless it happens to
+        equal the value just added. (This lets you use it to prune
+        another list somewhere.) Mine isn't strictly an LRU cache,
+        since a cache hit will get drowned in misses.
 
         If nothing was popped off because the cache hasn't yet grown
-        to N elements yet, the result will be C{None}.
-
+        to N elements yet, or the new value equals the popped-off one,
+        the result will be C{None}.
         """
         k = self._checkIndex(k)
         c = self.caches[k]
         if len(c) >= self.N:
             result = c.pop()
+            if result == x:
+                result = None
         else:
             result = None
         c.appendleft(x)
@@ -135,12 +141,16 @@ class Base(object):
                 proto += "\n{}"
             print proto.format(*args)
 
-    def oops(self, failure):
-        maybeReactor = globals().get('reactor', None)
-        if maybeReactor:
-            maybeReactor.stop()
-        raise DeferredException(
-            failure.printDetailedTraceback())
+    def oops(self, failure, *args):
+        from twisted.internet import reactor
+        if reactor.running:
+            try:
+                reactor.stop()
+            except:
+                pass
+        contextInfo = ": "+args[0].format(*args[1:]) if args else ""
+        print "\nFAILURE in {}{}".format(repr(self), contextInfo)
+        failure.raiseException()
     
     def csvTextToList(self, text, converter):
         if text:

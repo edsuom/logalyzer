@@ -13,6 +13,7 @@ from twisted.internet import defer, threads
 
 
 from util import Base
+import database
 
 
 class ParserRecordKeeper(object):
@@ -65,7 +66,8 @@ class ParserRecordKeeper(object):
                 del recordList[ipList.index(ip)]
                 
         removedKeys = []
-        for key, recordList in self.records.iteritems():
+        for key in self.records.keys():
+            recordList = self.records.get(key, [])
             for record in recordList:
                 if record['ip'] == ip:
                     # Oops, we have to cleanse this record list of at
@@ -151,18 +153,24 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
     my constructor and I will do the recordkeeping persistently via
     that database, too.
     """
-    def __init__(self, dbURL=None):
+    progressChars = "xo+XO"
+
+    def __init__(self, dbURL=None, warnings=False, echo=False):
         super(MasterRecordKeeper, self).__init__()
         if dbURL is None:
             self.trans = None
         else:
-            self.trans = database.Transactor(dbURL)
+            self.trans = database.Transactor(dbURL, echo=echo)
+            self.verbose = warnings
+        self.pk = 0
 
     def shutdown(self):
         if self.trans is None:
             return defer.succeed(None)
-        return self.trans.shutdown()
-        
+        self.msg("Shutting down master recordkeeper...")
+        return self.trans.shutdown().addCallback(
+            lambda _ : self.msg("  ...shutdown complete"))
+    
     def _purgeFromDB(self, ip):
         def donePurging(N):
             if N > 0:
@@ -201,20 +209,41 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
         # purge
         return defer.DeferredList(dList)
 
-    def addRecordToDB(self, dt, k, record):
+    def _addRecordToDB(self, dt, k, record):
         """
-        As the supplied record to my database (if I'm running one) for the
-        specified datetime-sequence combination dt-k.
+        Adds the supplied record to my database (if I'm running one) for
+        the specified datetime-sequence combination dt-k.
         """
+        def done(kNew):
+            if kNew != k:
+                self.msg(
+                    "\nWARNING: Conflicting record in DB: " +\
+                    "Timestamp {}, was at k={:d}, written as k={:d}",
+                    str(dt), k, kNew, "-")
         
-        
-    
+        return self.trans.setRecord(
+            dt, k, record).addCallbacks(done, self.oops)
+
     @defer.inlineCallbacks
     def addRecords(self, records):
+        def progressChar():
+            pc = self.progressChars[self.pk]
+            self.pk = (self.pk + 1) % len(self.progressChars)
+            return pc
+
+        N = 0
+        pc = progressChar()
+        self.msg("\nAdding '{}' records:", pc)
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
                 self.addRecordToRecords(dt, thisRecord)
-                yield self.addRecordToDB(dt, k, thisRecord)
+                if self.trans:
+                    yield self._addRecordToDB(
+                        dt, k, thisRecord).addErrback(self.oops)
+                    if self.verbose:
+                        print pc,
+                        N += 1
+        self.msg("\nAdded {:d} '{}' Records", N, pc, "-")
     
     def getStuff(self):
         """
