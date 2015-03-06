@@ -17,6 +17,9 @@ from testbase import *
 import database
 
 
+ROWS = [(dt1, 0), (dt1, 1), (dt2, 0)]
+
+
 def makeEntry(http, was_rd, ip, *ids):
     result = [http, was_rd, ip]
     for thisID in ids:
@@ -25,6 +28,38 @@ def makeEntry(http, was_rd, ip, *ids):
         result.append(1)
     return result
 
+
+class TestDTK(TestCase):
+    def test_init(self):
+        dtk = database.DTK(ROWS)
+        self.assertEqual(len(dtk), 3)
+        self.assertEqual(
+            dtk.x,
+            {2015: {
+                2: {20: {12: {2:  {49: [0, 1]}}}},
+                3: {2:  {21: {17: {16: [0]}}}}}}
+            )
+
+    def test_check(self):
+        dtk = database.DTK()
+        self.assertFalse(dtk.check(dt1, 0))
+        dtk.load(ROWS)
+        self.assertTrue(dtk.check(dt1, 0))
+        self.assertTrue(dtk.check(dt1, 1))
+        self.assertFalse(dtk.check(dt1, 2))
+        self.assertTrue(dtk.check(dt2, 0))
+        self.assertFalse(dtk.check(dt2, 1))
+
+    def test_set(self):
+        dtk = database.DTK()
+        self.assertFalse(dtk.check(dt1, 0))
+        dtk.set(dt1, 0)
+        self.assertTrue(dtk.check(dt1, 0))
+        self.assertFalse(dtk.check(dt1, 1))
+        dtk.set(dt1, 1)
+        self.assertTrue(dtk.check(dt1, 1))
+        self.assertFalse(dtk.check(dt1, 2))
+        
 
 class TestTransactor(TestCase):
     def setUp(self):
@@ -40,21 +75,21 @@ class TestTransactor(TestCase):
     
     def test_setEntry(self):
         def cb1(result):
-            self.assertFalse(result)
+            self.assertEqual(result, 'a')
             self.assertTrue(os.path.isfile(self.dbPath))
             return self.t.setEntry(
                 dt1, 1, values).addCallback(cb2)
 
         def cb2(result):
-            self.assertFalse(result)
+            self.assertEqual(result, 'a')
             return self.t.setEntry(
                 dt1, 1, values).addCallback(cb3)
 
         def cb3(result):
-            self.assertFalse(result)
+            self.assertEqual(result, 'p')
             values[0] = 404
             return self.t.setEntry(
-                dt1, 1, values).addCallback(self.assertTrue)
+                dt1, 1, values).addCallback(self.assertEqual, 'c')
 
         values = makeEntry(200, False, ip1)
         return self.t.setEntry(dt1, 0, values).addCallback(cb1)
@@ -63,16 +98,16 @@ class TestTransactor(TestCase):
     def test_setRecord(self):
         firstRecord = RECORDS[dt1][0]
         # Set once and check what we get is what we set
-        k = yield self.t.setRecord(dt1, 0, firstRecord)
-        self.assertEqual(k, 0)
+        result = yield self.t.setRecord(dt1, 0, firstRecord)
+        self.assertEqual(result, None)
         record = yield self.t.getRecord(dt1, 0)
         self.assertEqual(record, firstRecord)
         # Set again with slight difference to confirm caching doesn't
         # raise error
         modRecord = firstRecord.copy()
         modRecord['ua'] = "Foo Browser/1.2"
-        k = yield self.t.setRecord(dt1, 2, modRecord)
-        self.assertEqual(k, 2)
+        result = yield self.t.setRecord(dt1, 2, modRecord)
+        self.assertEqual(result, None)
         record = yield self.t.getRecord(dt1, 2)
         self.assertEqual(record, modRecord)
     
@@ -80,8 +115,8 @@ class TestTransactor(TestCase):
     def writeAllRecords(self):
         for dt, theseRecords in RECORDS.iteritems():
             for k, thisRecord in enumerate(theseRecords):
-                kNew = yield self.t.setRecord(dt, k, thisRecord)
-                self.assertEqual(kNew, k)
+                result = yield self.t.setRecord(dt, k, thisRecord)
+                self.assertEqual(result, None)
 
     def test_writeMultipleRecords(self):
         return self.writeAllRecords()
@@ -91,12 +126,12 @@ class TestTransactor(TestCase):
         yield self.writeAllRecords()
         cRecord = RECORDS[dt1][0]
         # Repeat of same record yields same sequence
-        kNew = yield self.t.setRecord(dt1, 0, cRecord)
-        self.assertEqual(kNew, 0)
+        result = yield self.t.setRecord(dt1, 0, cRecord)
+        self.assertEqual(result, None)
         # Change URL and get new sequence
         cRecord['url'] = "/bogus.html"
-        kNew = yield self.t.setRecord(dt1, 0, cRecord)
-        self.assertEqual(kNew, 2)
+        result = yield self.t.setRecord(dt1, 0, cRecord)
+        self.assertEqual(result, 2)
 
     @defer.inlineCallbacks
     def test_purgeIP(self):

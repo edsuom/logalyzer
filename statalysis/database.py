@@ -17,10 +17,17 @@ import util
 class DTK(object):
     """
     """
-    units = ['year', 'month', 'day', 'hour', 'minute']
+    units = ['year', 'month', 'day', 'hour', 'minute', 'second']
 
-    def __init__(self, rows):
+    def __init__(self, rows=[]):
+        self.N = 0
         self.x = {}
+        self.load(rows)
+
+    def __len__(self):
+        return self.N
+
+    def load(self, rows):
         for dtThis, kThis in rows:
             self.set(dtThis, kThis)
 
@@ -41,12 +48,13 @@ class DTK(object):
         unitList = [getattr(dt, x) for x in self.units]
         for unitName in self.units:
             unitVal = getattr(dt, unitName)
-            if unitName == 'minute': 
+            if unitName == 'second':
                 stuff = stuff.setdefault(unitVal, [])
             else:
                 stuff = stuff.setdefault(unitVal, {})
         if k not in stuff:
             stuff.append(k)
+            self.N += 1
 
 
 class Transactor(AccessBroker, util.Base):
@@ -109,22 +117,28 @@ class Transactor(AccessBroker, util.Base):
         datetime-sequence combination dt-k. See my colNames attribute
         for the six values you need to supply.
 
-        Returns a deferred that fires with True if a new entry was
-        already present with the different values, False if it was
-        added or already present with the same values.
+        Returns a deferred that fires with one of three status values:
+
+        p: Present: Matching dt-k entry present with identical values,
+           nothing added.
+        c: Conflict: Matching dt-k entry found, but with differing
+           values, you need to add another one with a different k.
+        a: Added: No matching dt-k entry found, so one was added.
         """
         def checkExisting(rowValues):
             for k, value in enumerate(rowValues):
                 if value != values[k]:
-                    return True
-            return False
+                    return 'c'
+            return 'p'
 
         if not hasattr(self, 'dtk'):
+            # Setup dt-k in-memory lookup tree (for speedup)
             col = self.entries.c
             for sh in self.selectorator(col.dt, col.k):
                 pass
             rows = sh().fetchall()
             self.dtk = DTK(rows)
+        # Check the lookup tree first
         if self.dtk.check(dt, k):
             # There appears to be a dt-k entry already...
             row = self.getEntry(dt, k)
@@ -138,7 +152,7 @@ class Transactor(AccessBroker, util.Base):
             kw[name] = values[j]
         self.entries.insert().execute(**kw)
         self.dtk.set(dt, k)
-        return False
+        return 'a'
 
     @transact
     def setNameValue(self, name, value):
@@ -168,9 +182,11 @@ class Transactor(AccessBroker, util.Base):
         Adds all needed database entries for the supplied record at
         the specified datetime-sequence combination dt-k.
 
-        Returns a deferred that fires with a new value of k if there
-        was a conflict with an existing dt-k combination and the new
-        value had to be obtained, or with the old k value if not.
+        Returns a deferred that fires with C{None} if a new database
+        entry was written, a new value of k if there was a conflict
+        with an existing dt-k combination and the new value had to be
+        obtained, or with the old k value if there was the same exact
+        entry (no conflict).
 
         A conflict exists when there is already an entry for the
         specified dt-k combination that matches values than the ones
@@ -193,14 +209,21 @@ class Transactor(AccessBroker, util.Base):
                     del valueDict[discardedValue]
                 valueDict[value] = ID
             values.append(ID)
-        wasPresent = yield self.setEntry(dt, k, values)
-        if wasPresent:
-        # Need to get a new sequence number for this entry
+        code = yield self.setEntry(dt, k, values)
+        if code == 'p':
+            result = k
+        if code == 'c':
+            # Need to get a new sequence number for this entry
             maxSequence = yield self.getMaxSequence(dt)
             k = maxSequence + 1
-            yield self.setEntry(dt, k, values)
+            code = yield self.setEntry(dt, k, values)
+            if code == 'c':
+                raise Exception("Couldn't add with new sequenc number!")
+            result = k
+        elif code == 'a':
+            result = None
         defer.returnValue(k)
-
+    
     @transact
     def getRecord(self, dt, k):
         """

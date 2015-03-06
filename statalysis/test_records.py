@@ -54,7 +54,7 @@ class TestMasterRecordKeeper(TestCase):
         
     @defer.inlineCallbacks
     def test_addRecords(self):
-        yield self.rk.addRecords(RECORDS)
+        yield self.rk.addRecords(RECORDS, "access.log")
         self.failUnlessEqual(self.rk.records, RECORDS)
         N = yield self.t.hitsForIP(ip1)
         self.failUnlessEqual(N, 2)

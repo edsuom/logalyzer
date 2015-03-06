@@ -323,8 +323,9 @@ class Reader(Base):
                 for ip in ipList:
                     yield self.rk.purgeIP(ip).addErrback(
                         self.oops, "Trying to purge IP {}", ip)
-                yield self.rk.addRecords(records).addErrback(
-                    self.oops, "Trying to add records for {}", fileName)
+                yield self.rk.addRecords(
+                    records, fileName).addErrback(
+                        self.oops, "Trying to add records for {}", fileName)
                 defer.returnValue(True)
             else:
                 # Retry

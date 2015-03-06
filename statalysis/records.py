@@ -211,37 +211,40 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
         """
         Adds the supplied record to my database (if I'm running one) for
         the specified datetime-sequence combination dt-k.
+
+        Returns 1 if a new entry was written, 0 if not. Use that
+        result to increment a counter.
         """
-        def done(kNew):
+        def done(result):
+            if result is None:
+                return 1
             if kNew != k:
                 self.msg(
                     "WARNING: Conflicting record in DB: " +\
                     "Timestamp {}, was at k={:d}, written as k={:d}",
                     str(dt), k, kNew, "-")
+                return 1
+            return 0
         
         return self.trans.setRecord(
             dt, k, record).addCallbacks(done, self.oops)
 
     @defer.inlineCallbacks
-    def addRecords(self, records):
-        def progressChar():
-            pc = self.progressChars[self.pk]
-            self.pk = (self.pk + 1) % len(self.progressChars)
-            return pc
-
-        N = 0
-        pc = progressChar()
-        self.msg("Adding '{}' records:", pc)
+    def addRecords(self, records, fileName):
+        N = [0, 0]
+        self.msg("Adding records from {}", fileName)
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
                 self.addRecordToRecords(dt, thisRecord)
                 if self.trans:
-                    yield self._addRecordToDB(
+                    inc = yield self._addRecordToDB(
                         dt, k, thisRecord).addErrback(self.oops)
                     if self.verbose:
-                        print pc,
-                        N += 1
-        self.msg("Added {:d} '{}' Records", N, pc, "-")
+                        N[0] += inc
+                        N[1] += 1
+        self.msg(
+            "Added {:d} of {:d} records from {} to DB",
+            N[0], N[1], fileName, "-")
     
     def getStuff(self):
         """
