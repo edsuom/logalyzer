@@ -16,6 +16,7 @@ import util
 
 class DTK(object):
     """
+    I maintain an efficient lookup tree for dt-k combinations.
     """
     units = ['year', 'month', 'day', 'hour', 'minute', 'second']
 
@@ -28,11 +29,16 @@ class DTK(object):
         return self.N
 
     def load(self, rows):
+        """
+        Load a list of dt-k combinations.
+        """
         for dtThis, kThis in rows:
             self.set(dtThis, kThis)
 
     def check(self, dt, k):
         """
+        Check the specified dt-k combination, returning C{True} if
+        it's in my lookup tree.
         """
         stuff = self.x
         for unitVal in [getattr(dt, x) for x in self.units]:
@@ -43,6 +49,8 @@ class DTK(object):
 
     def set(self, dt, k):
         """
+        Sets an entry in my lookup tree for the specified dt-k
+        combination.
         """
         stuff = self.x
         unitList = [getattr(dt, x) for x in self.units]
