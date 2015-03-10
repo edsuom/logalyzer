@@ -280,7 +280,7 @@ class Recorder(Base):
     
     def run(self):
         if self.opt['g']:
-            self.gui = gui.Main()
+            self.gui = gui.GUI()
         kw = {
             'printRecords': self.opt['p'],
             'gui': self.gui

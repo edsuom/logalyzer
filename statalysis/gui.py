@@ -77,12 +77,30 @@ class GUI(object):
     """
     palette = [('heading', 'default,bold', 'default'),]
 
-    def __init__(self):
+    def __init__(self, reactor, stopper):
         self.id_counter = 0
+        if not callable(stopper):
+            raise TypeError(
+                "Stopper '{}' is not callable".format(stopper))
+        self.stopper = stopper
         self.messages = u.LineBox(Messages())
         self.files = u.LineBox(Files())
-        self.main = u.WidgetWrap(u.Pile([self.messages, self.files]))
-    
+        main = u.WidgetWrap(u.Pile([self.messages, self.files]))
+        eventLoop = u.TwistedEventLoop(
+            reactor, manage_reactor=False)
+        self.loop = u.MainLoop(
+            main, palette=self.palette, handle_mouse=False,
+            unhandled_input=self.possiblyQuit, event_loop=eventLoop)
+
+    def start(self):
+        self.loop.start()
+
+    def possiblyQuit(self, key):
+        if key in ('q', 'Q'):
+            self.stopper()
+            self.loop.stop()
+
+        
     def msgHeading(self, text, ID=None):
         if ID is None:
             self.id_counter += 1
