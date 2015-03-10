@@ -127,6 +127,10 @@ class Base(object):
     Subclass me to have a few convenient methods and easily work with
     a directory. The default directory is the current one, set another
     with the 'myDir' attribute.
+
+    I look at my I{gui} and I{verbose} attributes to decide what to
+    show users from your calls to L{msgHeading} and L{msgBody}.
+
     """
     verbose = False
 
@@ -149,15 +153,17 @@ class Base(object):
             dt.year, dt.month, dt.day,
             dt.hour, dt.minute)
         
-    def msg(self, proto, *args, **kw):
+    def msgHeading(self, proto, *args):
         if self.verbose:
-            if not kw.get('noLeadingNewline', False):
-                proto = "\n" + proto
-            if args and args[-1].startswith('-'):
-                args = list(args[:-1]) + ["-"*70]
-                proto += "\n{}"
+            proto = "\n" + proto
+            args = list(args) + ["-"*70]
+            proto += "\n{}"
             print proto.format(*args)
 
+    def msgBody(self, proto, *args):
+        if self.verbose:
+            print proto.format(*args)
+            
     def oops(self, failure, *args):
         from twisted.internet import reactor
         if reactor.running:
@@ -166,7 +172,8 @@ class Base(object):
             except:
                 pass
         contextInfo = ": "+args[0].format(*args[1:]) if args else ""
-        print "\nFAILURE in {}{}".format(repr(self), contextInfo)
+        self.msgHeading(
+            "FAILURE in {}{}", repr(self), contextInfo)
         failure.printDetailedTraceback()
     
     def csvTextToList(self, text, converter):

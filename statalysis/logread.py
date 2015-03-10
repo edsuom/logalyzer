@@ -217,7 +217,7 @@ class Parser(Base):
         # addresses (useful if -i option set)
         if self.botMatcher(ip, url) or self.refMatcher(ip, ref):
             if self.rk.purgeIP(ip):
-                self.msg(line, noLeadingNewline=True)
+                self.msgBody(line)
             return
         if self.exclude:
             if http in self.exclude:
@@ -253,12 +253,13 @@ class Parser(Base):
             try:
                 # This next line is where most of the processing time is spent
                 stuff = self.makeRecord(line)
-            except:
-                import sys, traceback
-                eType, eValue = sys.exc_info()[:2]
-                print "ERROR {}: '{}'\n when parsing logfile '{}':\n{}\n".format(
+            except Exception, e:
+                import traceback
+                eType, eValue = e[:2]
+                self.msgHeading(
+                    "ERROR {}: '{}'\n when parsing logfile '{}':\n{}\n",
                     eType.__name__, eValue, fileName, line)
-                traceback.print_tb(sys.exc_info()[2])
+                traceback.print_tb(e[2])
                 fh.close()
                 return
             if stuff:
@@ -276,11 +277,11 @@ class Reader(Base):
     def __init__(
             self, logDir, dbURL=None,
             rules={}, vhost=None, exclude=[], ignoreSecondary=False,
-            cores=None, verbose=False, info=False, warnings=False):
+            cores=None, verbose=False, info=False, warnings=False, gui=None):
         #----------------------------------------------------------------------
         self.myDir = logDir
         from records import MasterRecordKeeper
-        self.rk = MasterRecordKeeper(dbURL, warnings=warnings)
+        self.rk = MasterRecordKeeper(dbURL, warnings=warnings, gui=gui)
         matchers = {}
         for matcherName, ruleList in rules.iteritems():
             thisMatcher = getattr(sift, matcherName)(ruleList)
@@ -296,16 +297,16 @@ class Reader(Base):
             else:
                 cores = int(cores)
             self.q = ProcessQueue(cores, parser=parser)
-        if verbose:
-            self.verbose = True
-
+        self.verbose = verbose
+        self.gui = gui
+    
     @defer.inlineCallbacks
     def done(self, null):
-        self.msg("Shutting down processes...")
+        self.msgBody("Shutting down processes...")
         yield self.q.shutdown()
-        self.msg("Shutting down master recordkeeper...")
+        self.msgBody("Shutting down master recordkeeper...")
         yield self.rk.shutdown()
-        self.msg("Shutdowns complete", "-")
+        self.msgBody("Shutdowns complete")
         defer.returnValue(self.rk.getStuff())
             
     def run(self):
@@ -318,7 +319,7 @@ class Reader(Base):
         def gotSomeResults(results, fileName):
             if results:
                 ipList, records = results
-                self.msg("{}: {:d} purged IPs, {:d} records".format(
+                self.msgBody("{}: {:d} purged IPs, {:d} records".format(
                     fileName, len(ipList), len(records)))
                 for ip in ipList:
                     yield self.rk.purgeIP(ip).addErrback(
@@ -329,7 +330,7 @@ class Reader(Base):
                 defer.returnValue(True)
             else:
                 # Retry
-                self.msg("RETRY: {}", fileName, "-")
+                self.msgBody("RETRY: {}", fileName)
                 yield dispatch(fileName)
         
         def dispatch(fileName):

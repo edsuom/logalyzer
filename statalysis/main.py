@@ -112,6 +112,9 @@ Provide info about IP records being purged
 -w, --warn
 Provide database transaction info
 
+-g, --gui
+Run with console-mode GUI (implies -v, --info, and -w)
+
 
 LICENSE
 Copyright (C) 2015 Tellectual LLC
@@ -128,20 +131,20 @@ class RuleReader(Base):
     """
     I read rule files
     """
-    def __init__(self, rulesDir='rules', verbose=False):
+    def __init__(self, rulesDir='rules', gui=None, verbose=False):
         self.myDir = rulesDir
+        self.gui = None
         self.verbose = verbose
     
     def linerator(self, filePath):
-        self.msg("Reading '{}'...", filePath, '-', noLeadingNewline=True)
+        self.msgHeading("Reading '{}'...", filePath)
         fh = open(filePath, 'rb')
         for line in fh:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            self.msg("| {}", line, noLeadingNewline=True)
+            self.msgBody("| {}", line)
             yield line
-        self.msg("")
         fh.close()
 
     def lines(self, filePath):
@@ -210,8 +213,7 @@ class Recorder(Base):
         rulesDir = self.opt['d']
         if rulesDir is None:
             rulesDir = self.myDir
-        self.msg(
-            "Loading rules from '{}'", rulesDir, '-', noLeadingNewline=True)
+        self.msgHeading("Loading rules from '{}'", rulesDir)
         rules = {}
         rr = RuleReader(rulesDir, self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
@@ -228,9 +230,9 @@ class Recorder(Base):
         I generate and return a log reader with all its rules loaded 
         """
         rules = self.loadRules()
-        self.msg("Exclusions", '-')
+        self.msgHeading("Exclusions")
         exclude = self.csvTextToList(self.opt['e'], int)
-        self.msg(
+        self.msgBody(
             "| HTTP Codes: {}", ", ".join([str(x) for x in exclude]),
             noLeadingNewline=True)
         return logread.Reader(
@@ -239,7 +241,8 @@ class Recorder(Base):
             rules=rules, vhost=self.opt['vhost'],
             exclude=exclude, ignoreSecondary=self.opt['y'],
             cores=self.opt['cores'],
-            verbose=self.verbose, info=self.opt['info'], warnings=self.opt['w'])
+            verbose=self.verbose, info=self.opt['info'],
+            warnings=self.opt['w'], gui=self.gui)
 
     def _doneReading(self, stuff):
         """
@@ -276,13 +279,20 @@ class Recorder(Base):
         self.w.writeIPs(ipList, outPath)
     
     def run(self):
-        self.w = Writer(*list(self.opt), **{'printRecords': self.opt['p']})
+        if self.opt['g']:
+            self.gui = gui.Main()
+        kw = {
+            'printRecords': self.opt['p'],
+            'gui': self.gui
+        }
+
         if self.opt['c']:
             outPath = self.opt['s']
             self.consolidate(outPath)
         else:
             self.reader = self.readerFactory()
             reactor.callWhenRunning(self.load)
+            self.w = Writer(*list(self.opt), **kw)
             reactor.run()
 
 

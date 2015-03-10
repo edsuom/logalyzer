@@ -153,9 +153,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
     my constructor and I will do the recordkeeping persistently via
     that database, too.
     """
-    progressChars = "1234567890"
-
-    def __init__(self, dbURL=None, warnings=False, echo=False):
+    def __init__(self, dbURL=None, warnings=False, echo=False, gui=None):
         super(MasterRecordKeeper, self).__init__()
         if dbURL is None:
             self.trans = None
@@ -163,6 +161,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
             self.trans = database.Transactor(dbURL, echo=echo)
             self.verbose = warnings
         self.pk = 0
+        self.gui = gui
     
     def shutdown(self):
         if self.trans is None:
@@ -172,7 +171,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
     def _purgeFromDB(self, ip):
         def donePurging(N):
             if N > 0:
-                self.msg("Purged DB of {:d} entries for IP {}", N, ip)
+                self.msgBody("Purged DB of {:d} entries for IP {}", N, ip)
         
         if self.trans is None:
             return defer.succeed(0)
@@ -219,10 +218,10 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
             if result is None:
                 return 1
             if kNew != k:
-                self.msg(
+                self.msgBody(
                     "WARNING: Conflicting record in DB: " +\
                     "Timestamp {}, was at k={:d}, written as k={:d}",
-                    str(dt), k, kNew, "-")
+                    str(dt), k, kNew)
                 return 1
             return 0
         
@@ -232,7 +231,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
     @defer.inlineCallbacks
     def addRecords(self, records, fileName):
         N = [0, 0]
-        self.msg("Adding records from {}", fileName)
+        self.msgHeading("Adding records from {}", fileName)
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
                 self.addRecordToRecords(dt, thisRecord)
@@ -242,9 +241,9 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
                     if self.verbose:
                         N[0] += inc
                         N[1] += 1
-        self.msg(
+        self.msgBody(
             "Added {:d} of {:d} records from {} to DB",
-            N[0], N[1], fileName, "-")
+            N[0], N[1], fileName)
     
     def getStuff(self):
         """

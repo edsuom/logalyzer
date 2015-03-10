@@ -39,6 +39,7 @@ class Writer(Base):
             thisType = filePath.split('.')[-1].upper()
             self.writeTypes[thisType] = filePath
         self.verbose = kw.get('printRecords', False)
+        self.gui = kw.get('gui', None)
     
     def ipToLong(self, ip):
         """
@@ -97,10 +98,10 @@ class Writer(Base):
         """
         keys = sorted(records.keys())
         for dt in keys:
-            self.msg("{}", self.dtFormat(dt), "-")
+            self.msgHeading(self.dtFormat(dt))
             theseRecords = records[dt]
             for k, thisRecord in enumerate(theseRecords):
-                self.msg("{:3d}: {}", k, thisRecord)
+                self.msgBody("{:3d}: {}", k, thisRecord)
                 yield dt, k, thisRecord
     
     def _setupCSV(self, filePath):
