@@ -35,7 +35,8 @@ class Display(object):
                 raise u.ExitMainLoop()
         
         main = u.WidgetWrap(widget)
-        reactor.callLater(self.lifetime, possiblyQuit, 'q')
+        #reactor.callLater(self.lifetime, possiblyQuit, 'q')
+        reactor.addSystemEventTrigger('before', 'shutdown', self.stop)
         self.loop = u.MainLoop(
             main, palette=self.palette, handle_mouse=False,
             unhandled_input=possiblyQuit, event_loop=eventLoop)
@@ -49,9 +50,6 @@ class TestMessages(TestCase):
     def setUp(self):
         self.m = gui.Messages()
         self.display = Display(self.m)
-
-    def tearDown(self):
-        self.display.stop()
     
     def test_justHeading(self):
         self.m.heading("Foo Bar", 1)
