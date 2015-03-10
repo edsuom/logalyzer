@@ -19,7 +19,7 @@ class MessageBox(u.Frame):
         header = u.Text(('heading', text))
         self.w = u.SimpleListWalker([])
         body = u.ListBox(self.w)
-        super(Message, self).__init__(body, header=header)
+        super(MessageBox, self).__init__(body, header=header)
 
     def add(self, text):
         self.w.append(u.Text(text))
@@ -77,29 +77,23 @@ class GUI(object):
     """
     palette = [('heading', 'default,bold', 'default'),]
 
-    def __init__(self, reactor, stopper):
+    def __init__(self):
         self.id_counter = 0
-        if not callable(stopper):
-            raise TypeError(
-                "Stopper '{}' is not callable".format(stopper))
-        self.stopper = stopper
         self.messages = u.LineBox(Messages())
         self.files = u.LineBox(Files())
         main = u.WidgetWrap(u.Pile([self.messages, self.files]))
-        eventLoop = u.TwistedEventLoop(
-            reactor, manage_reactor=False)
+        eventLoop = u.TwistedEventLoop()
         self.loop = u.MainLoop(
             main, palette=self.palette, handle_mouse=False,
-            unhandled_input=self.possiblyQuit, event_loop=eventLoop)
+            unhandled_input=eventLoop(self.possiblyQuit),
+            event_loop=eventLoop)
 
-    def start(self):
-        self.loop.start()
+    def run(self):
+        self.loop.run()
 
     def possiblyQuit(self, key):
         if key in ('q', 'Q'):
-            self.stopper()
-            self.loop.stop()
-
+            raise u.ExitMainLoop()
         
     def msgHeading(self, text, ID=None):
         if ID is None:

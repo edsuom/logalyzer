@@ -124,7 +124,7 @@ from twisted.internet import reactor
 
 from util import Base
 from writer import Writer
-import logread
+import logread, gui
 
 
 class RuleReader(Base):
@@ -279,20 +279,19 @@ class Recorder(Base):
         self.w.writeIPs(ipList, outPath)
     
     def run(self):
-        if self.opt['g']:
-            self.gui = gui.GUI()
-        kw = {
-            'printRecords': self.opt['p'],
-            'gui': self.gui
-        }
-
         if self.opt['c']:
             outPath = self.opt['s']
             self.consolidate(outPath)
+            return
+        if self.opt['g']:
+            self.gui = gui.GUI()
+        self.reader = self.readerFactory()
+        reactor.callWhenRunning(self.load)
+        kw = {'printRecords': self.opt['p'], 'gui': self.gui}
+        self.w = Writer(*list(self.opt), **kw)
+        if self.opt['g']:
+            self.gui.run()
         else:
-            self.reader = self.readerFactory()
-            reactor.callWhenRunning(self.load)
-            self.w = Writer(*list(self.opt), **kw)
             reactor.run()
 
 
