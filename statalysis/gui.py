@@ -122,8 +122,9 @@ class FileRow(u.ListBox):
     def __init__(self, fileName, leftColWidth, totalWidth):
         self.p = ProgressText()
         self.leftColWidth = leftColWidth
+        self.statusText = ""
         self.status = u.Text("", wrap='clip')
-        rowWidgets = u.Columns([
+        self.rowWidgets = u.Columns([
             # File name
             (leftColWidth, u.Text(fileName, align='right')),
             # Progress indicator
@@ -131,15 +132,19 @@ class FileRow(u.ListBox):
             # Status line
             (self._rightColWidth(totalWidth), self.status),
         ], dividechars=self.gutterWidth)
-        rowList = u.SimpleListWalker([rowWidgets])
+        rowList = u.SimpleListWalker([self.rowWidgets])
         super(FileRow, self).__init__(rowList)
 
     def _rightColWidth(self, totalWidth):
         return totalWidth - self.leftColWidth - 1 - 2*self.gutterWidth
         
     def updateWidth(self, width):
-        self.contents[2][1] = self.options(
-            'given', self._rightColWidth(width))
+        self.status = u.Text(self.statusText, wrap='clip')
+        widget, options = self.rowWidgets.contents[2]
+        self.rowWidgets.contents[2] = (
+            self.status,
+            self.rowWidgets.options(
+                'given', self._rightColWidth(width)))
     
     def step(self):
         self.p.step()
@@ -148,6 +153,7 @@ class FileRow(u.ListBox):
         self.p.done()
 
     def setStatus(self, text):
+        self.statusText = text
         self.status.set_text(text)
     
         
@@ -183,8 +189,10 @@ class Files(u.GridFlow):
 
     def updateWidth(self, width):
         cellWidth = self._cellWidth(width)[0]
-        for stuff in self.contents:
-            stuff[1] = self.options(width_amount=cellWidth)
+        for k, stuff in enumerate(self.contents):
+            widget, options = stuff
+            widget.updateWidth(width)
+            self.contents[k] = (widget, self.options(width_amount=cellWidth))
     
     def indicator(self, fileName):
         """
@@ -209,6 +217,8 @@ class GUI(object):
     """
     I am the main curses interface.
     """
+    title = "Statalysis"
+    
     palette = [
         # Name
         # 'fg color,setting', 'background color', 'mono setting'
@@ -218,7 +228,7 @@ class GUI(object):
          'yellow,bold', 'default', 'bold'),
     ]
     
-    def __init__(self, fileNames):
+    def __init__(self):
         self.id_counter = 0
         # A screen is useful right away
         self.screen = Screen()
@@ -226,12 +236,18 @@ class GUI(object):
         self.screen.set_terminal_properties(
             colors=16,
             bright_is_bold=True)
-        # The pile of widgets
+
+    def start(self, fileNames):
+        # The top-level widgets
         self.m = Messages()
         self.f = Files(fileNames, self._dims()[0])
-        self.pile = u.Pile([
-            self.m])#, u.Divider('=', 1, 1)])#, self.f])
-        main = u.WidgetWrap(u.LineBox(self.pile))
+        p = u.Pile([u.Divider("=", 1, 1), self.f, u.Divider(" ")])
+        main = u.WidgetWrap(
+            u.LineBox(
+                u.Padding(
+                    u.Frame(self.m, footer=p),
+                    left=1, right=1),
+                title=self.title))
         eventLoop = u.TwistedEventLoop(reactor, manage_reactor=False)
         self.formerDims = self._dims()
         self.loop = u.MainLoop(
@@ -241,15 +257,14 @@ class GUI(object):
         self.loop.start()
 
     def _dims(self):
-        # Deduct 2 from each dimension due to outline
-        return [x-2 for x in self.screen.get_cols_rows()]
+        # Deduct 4 from each dimension due to outline and padding
+        return [x-4 for x in self.screen.get_cols_rows()]
 
     def update(self):
         width, height = self._dims()
         # Update for new width
         if width != self.formerDims[0]:
             self.f.updateWidth(width)
-        # TODO: Update height
         self.loop.draw_screen()
 
     def stop(self):
@@ -264,16 +279,19 @@ class GUI(object):
         self.id_counter += 1
         ID = self.id_counter
         self.m.heading(textProto.format(*args), ID)
+        self.update()
         return ID
 
     def msgBody(self, ID, textProto, *args):
         self.m.msg(textProto.format(*args), ID)
+        self.update()
 
     def fileStatus(self, fileName, *args):
         if args:
             self.f.setStatus(fileName, *args)
         else:
             self.f.indicator(fileName)
+        self.update()
 
 
         

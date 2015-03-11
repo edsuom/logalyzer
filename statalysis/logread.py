@@ -280,14 +280,12 @@ class Reader(Base):
             cores=None, verbose=False, info=False, warnings=False, gui=None):
         #----------------------------------------------------------------------
         self.myDir = logDir
+        self.fileNames = self.getLogFiles()
         from records import MasterRecordKeeper
         self.rk = MasterRecordKeeper(dbURL, warnings=warnings, gui=gui)
-        matchers = {}
-        for matcherName, ruleList in rules.iteritems():
-            thisMatcher = getattr(sift, matcherName)(ruleList)
-            matchers[matcherName] = thisMatcher
         parser = Parser(
-            matchers, vhost, exclude, ignoreSecondary, verbose=info)
+            self.getMatchers(rules),
+            vhost, exclude, ignoreSecondary, verbose=info)
         if self.bogusQueue:
             self.q = BogusQueue(parser=parser)
         else:
@@ -299,6 +297,20 @@ class Reader(Base):
             self.q = ProcessQueue(cores, parser=parser)
         self.verbose = verbose
         self.gui = gui
+
+    def getMatchers(self, rules):
+        result = {}
+        for matcherName, ruleList in rules.iteritems():
+            thisMatcher = getattr(sift, matcherName)(ruleList)
+            result[matcherName] = thisMatcher
+        return result
+        
+    def getLogFiles(self):
+        result = []
+        for fileName in self.filesInDir():
+            if 'access.log' in fileName:
+                result.append(fileName)
+        return result
     
     @defer.inlineCallbacks
     def done(self, null):
@@ -340,10 +352,6 @@ class Reader(Base):
             d.addErrback(self.oops, "Parsing of '{}'", fileName)
             return d
         
-        dList = []
-        for fileName in self.filesInDir():
-            if 'access.log' not in fileName:
-                continue
-            dList.append(dispatch(fileName))
+        dList = [dispatch(x) for x in self.fileNames]
         return defer.DeferredList(dList).addCallbacks(self.done, self.oops)
     

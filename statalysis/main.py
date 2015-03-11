@@ -283,16 +283,14 @@ class Recorder(Base):
             outPath = self.opt['s']
             self.consolidate(outPath)
             return
+        self.reader = self.readerFactory()
         if self.opt['g']:
             self.gui = gui.GUI()
-        self.reader = self.readerFactory()
+            self.gui.start(self.reader.fileNames)
         reactor.callWhenRunning(self.load)
         kw = {'printRecords': self.opt['p'], 'gui': self.gui}
         self.w = Writer(*list(self.opt), **kw)
-        if self.opt['g']:
-            self.gui.run()
-        else:
-            reactor.run()
+        reactor.run()
 
 
 def run():

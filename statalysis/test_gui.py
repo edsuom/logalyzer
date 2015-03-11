@@ -254,22 +254,25 @@ class TestFiles(TestCase):
 
 class TestGUI(TestCase):
     def setUp(self):
-        self.display = gui.GUI(FILENAMES)
+        self.display = gui.GUI()
+        self.display.start(FILENAMES)
         
     @defer.inlineCallbacks
     def test_update(self):
         ID = self.display.msgHeading("The mother of all messages!")
         for step in xrange(200):
-            fileName = random.choice(FILENAMES)
+            fileName = random.choice(FILENAMES[1:])
             if random.randint(0,20) == 1:
-                self.display.fileStatus(fileName, "Done at step {:d}!", step)
+                self.display.fileStatus(
+                    fileName, "Done at step {:d}!", step)
             else:
                 self.display.fileStatus(fileName)
             if random.randint(0,5) == 1:
                 ID = self.display.msgHeading(
                     "A new heading at step {:d}!", step)
             if random.randint(0,3) == 1:
-                self.display.msgBody(ID, "Body stuff, step {:d}...", step)
+                self.display.msgBody(
+                    ID, "Body stuff, step {:d}...", step)
             yield self.showBriefly(0.1)
         yield self.showBriefly(2.0)
 
