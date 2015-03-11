@@ -28,8 +28,10 @@ But the other won several prizes.
 """.strip().split('\n')
 
 FILENAMES = [
-    'foo.txt', 'bar.txt', 'really-cool-file.txt',
-    'lotsa-files.html', 'more-and-more.md']
+    'TEST-INFO',
+    'foo.txt', 'bar.txt', 'whatever.py', 'xyz.html',
+    'really-cool-file.txt', 'lotsa-files.html',
+    'more-and-more.md', 'cant_get_enough.log']
 
 
 def deferToDelay(delay=5):
@@ -232,12 +234,16 @@ class TestFilesAPI(tb.TestCase):
 class TestFiles(TestCase):
     useFiller = True
     def wInstance(self):
-        return gui.Files(FILENAMES, self.display.width())
+        self.totalWidth = self.display.width() - 2
+        return gui.Files(FILENAMES, self.totalWidth)
     
     @defer.inlineCallbacks
     def test_update(self):
+        fileName = FILENAMES[0]
+        width, nCols = self.w._cellWidth(self.totalWidth)
+        self.w.setStatus(fileName, "{:d} cols {:d} chars wide", nCols, width)
         for step in xrange(200):
-            fileName = random.choice(FILENAMES)
+            fileName = random.choice(FILENAMES[1:])
             if random.randint(0,20) == 1:
                 self.w.setStatus(fileName, "Done at step {:d}!", step)
             else:
@@ -252,13 +258,19 @@ class TestGUI(TestCase):
         
     @defer.inlineCallbacks
     def test_update(self):
+        ID = self.display.msgHeading("The mother of all messages!")
         for step in xrange(200):
             fileName = random.choice(FILENAMES)
             if random.randint(0,20) == 1:
                 self.display.fileStatus(fileName, "Done at step {:d}!", step)
             else:
                 self.display.fileStatus(fileName)
-            yield self.showBriefly(0.05)
+            if random.randint(0,5) == 1:
+                ID = self.display.msgHeading(
+                    "A new heading at step {:d}!", step)
+            if random.randint(0,3) == 1:
+                self.display.msgBody(ID, "Body stuff, step {:d}...", step)
+            yield self.showBriefly(0.1)
         yield self.showBriefly(2.0)
 
         

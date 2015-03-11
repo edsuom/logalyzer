@@ -157,14 +157,15 @@ class Files(u.GridFlow):
     processed.
     """
     gutterWidth = 2
-    minRightColWidth = 30
+    minRightColWidth = 40
     
     def __init__(self, fileNames, width):
         self.fileNames = fileNames
         self.leftColWidth = max([len(x) for x in fileNames])
         cellWidth = self._cellWidth(width)[0]
         widgetList = [
-            FileRow(x, self.leftColWidth, cellWidth) for x in fileNames]
+            u.BoxAdapter(FileRow(x, self.leftColWidth, cellWidth), 1)
+            for x in fileNames]
         super(Files, self).__init__(
             widgetList, cellWidth, self.gutterWidth, 0, 'left')
 
@@ -179,6 +180,11 @@ class Files(u.GridFlow):
         
     def _row(self, fileName):
         return self.contents[self.fileNames.index(fileName)][0]
+
+    def updateWidth(self, width):
+        cellWidth = self._cellWidth(width)[0]
+        for stuff in self.contents:
+            stuff[1] = self.options(width_amount=cellWidth)
     
     def indicator(self, fileName):
         """
@@ -214,24 +220,36 @@ class GUI(object):
     
     def __init__(self, fileNames):
         self.id_counter = 0
-        self.m = Messages()
-        self.f = Files(fileNames)
-        self.pile = u.Pile([
-            self.m, u.Divider('=', 1, 1), (len(fileNames), self.f)])
-        main = u.WidgetWrap(u.LineBox(self.pile))
-        eventLoop = u.TwistedEventLoop(reactor, manage_reactor=False)
+        # A screen is useful right away
         self.screen = Screen()
         self.screen.register_palette(self.palette)
         self.screen.set_terminal_properties(
             colors=16,
             bright_is_bold=True)
+        # The pile of widgets
+        self.m = Messages()
+        self.f = Files(fileNames, self._dims()[0])
+        self.pile = u.Pile([
+            self.m])#, u.Divider('=', 1, 1)])#, self.f])
+        main = u.WidgetWrap(u.LineBox(self.pile))
+        eventLoop = u.TwistedEventLoop(reactor, manage_reactor=False)
+        self.formerDims = self._dims()
         self.loop = u.MainLoop(
             main, screen=self.screen,
             unhandled_input=self.possiblyQuit, event_loop=eventLoop)
         reactor.addSystemEventTrigger('before', 'shutdown', self.stop)
         self.loop.start()
 
+    def _dims(self):
+        # Deduct 2 from each dimension due to outline
+        return [x-2 for x in self.screen.get_cols_rows()]
+
     def update(self):
+        width, height = self._dims()
+        # Update for new width
+        if width != self.formerDims[0]:
+            self.f.updateWidth(width)
+        # TODO: Update height
         self.loop.draw_screen()
 
     def stop(self):
@@ -242,17 +260,14 @@ class GUI(object):
         if key in ('q', 'Q'):
             reactor.stop()
     
-    def msgHeading(self, text, ID=None):
-        if ID is None:
-            self.id_counter += 1
-            ID = self.id_counter
-        self.messages.heading(text, ID)
+    def msgHeading(self, textProto, *args):
+        self.id_counter += 1
+        ID = self.id_counter
+        self.m.heading(textProto.format(*args), ID)
         return ID
 
-    def msgBody(self, text, ID=None):
-        if ID is None:
-            ID = self.id_counter
-        self.messages.body(text, ID)
+    def msgBody(self, ID, textProto, *args):
+        self.m.msg(textProto.format(*args), ID)
 
     def fileStatus(self, fileName, *args):
         if args:
