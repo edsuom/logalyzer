@@ -169,29 +169,46 @@ class Base(object):
         elif self.verbose:
             print proto.format(*args)
 
+    def msgOrphan(self, proto, *args):
+        if self.gui:
+            self.gui.msgOrphan(proto, *args)
+        elif self.verbose:
+            print proto.format(*args)
+            
+    def msgWarning(self, proto, *args):
+        if self.gui:
+            self.gui.warning(proto, *args)
+        elif self.verbose:
+            print "WARNING: "+proto.format(*args)
+    
     def fileStatus(self, fileName, *args):
         if self.gui:
             self.gui.fileStatus(fileName, *args)
         elif self.verbose:
             proto = "File {}: " + args[0]
-            args = [fileName] + args[1:]
+            args = [fileName] + list(args[1:])
             print proto.format(*args)
 
     def fileProgress(self, fileName):
         if self.gui:
             self.gui.fileStatus(fileName)
-    
+
     def oops(self, failure, *args):
-        from twisted.internet import reactor
-        if reactor.running:
-            try:
-                reactor.stop()
-            except:
-                pass
-        contextInfo = ": "+args[0].format(*args[1:]) if args else ""
-        self.msgHeading(
-            "FAILURE in {}{}", repr(self), contextInfo)
-        failure.printDetailedTraceback()
+        text = "In {},".format(repr(self))
+        if args:
+            textProto = "{} {},".format(text, args[0])
+            text = textProto.format(*args[1:])
+        text += "\n {}".format(failure.getTraceback())
+        if self.gui:
+            self.gui.error(text)
+        else:
+            from twisted.internet import reactor
+            if reactor.running:
+                try:
+                    reactor.stop()
+                except:
+                    pass
+            self.msgHeading("ERROR: {}", text)
     
     def csvTextToList(self, text, converter):
         if text:

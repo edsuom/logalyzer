@@ -12,6 +12,9 @@ from datetime import datetime
 
 from twisted.internet import defer, reactor
 
+# DEBUG
+#defer.Deferred.debug = True
+
 from asynqueue import ProcessQueue
 
 from util import *
@@ -272,7 +275,7 @@ class Reader(Base):
     """
     I read and parse web server log files
     """
-    bogusQueue = False
+    bogusQueue = True
     
     def __init__(
             self, logDir, dbURL=None,
@@ -332,22 +335,28 @@ class Reader(Base):
             if results:
                 ipList, records = results
                 self.fileStatus(
-                    fileName,
-                    "Purging {:d} IPs, adding {:d} records...",
-                    len(ipList), len(records))
+                    fileName, "Purging {:d} IPs", len(ipList))
                 for ip in ipList:
                     yield self.rk.purgeIP(ip).addErrback(
-                        self.oops, "Trying to purge IP {}", ip)
+                        self.oops,
+                        "Trying to purge IP {} while processing '{}'",
+                        ip, fileName)
                     self.fileProgress(fileName)
-                N = yield self.rk.addRecords(
-                    records, fileName).addErrback(
-                        self.oops, "Trying to add records for {}", fileName)
-                if N[0]:
+                N_total = self.rk.len(records)
+                self.fileStatus(
+                    fileName,
+                    "Adding {:d} records", N_total)
+                d = self.rk.addRecords(records, fileName)
+                d.addErrback(
+                    self.oops,
+                    "Trying to add records for {}", fileName)
+                N_added = yield d
+                if N_added > 0:
                     self.fileStatus(
                         fileName,
-                        "Added {:d} of {:d} records to DB", N[0], N[1])
+                        "Added {:d} of {:d} records to DB", N_added, N_total)
                 else:
-                    self.fileStatus(fileName, "{:d} records", N[1])
+                    self.fileStatus(fileName, "{:d} records", N_total)
                 defer.returnValue(True)
             else:
                 # Retry

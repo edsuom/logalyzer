@@ -43,13 +43,12 @@ def deferToDelay(delay=5):
 class Display(object):
     lifetime = 10 # seconds
     
-    def __init__(self):
+    def __init__(self, palette=None):
         # A screen is useful to have right away
         self.screen = Screen()
-        self.screen.register_palette(gui.GUI.palette)
-        self.screen.set_terminal_properties(
-            colors=16,
-            bright_is_bold=True)
+        if palette is None:
+            palette = gui.GUI.palette
+        self.screen.register_palette(palette)
 
     def setWidget(self, widget, useFiller=False):
         def possiblyQuit(key):
@@ -85,8 +84,10 @@ class Display(object):
 
         
 class TestCase(tb.TestCase):
+    palette = None
+    
     def setUp(self):
-        self.display = Display()
+        self.display = Display(self.palette)
         if hasattr(self, 'wInstance'):
             self.w = self.wInstance()
         else:
@@ -101,6 +102,30 @@ class TestCase(tb.TestCase):
         self.display.update()
         return deferToDelay(delay)
 
+
+class TestPalette(TestCase):
+    palette = []
+    _colorNames = [
+        'black', 'dark red', 'dark green', 'brown', 'dark blue',
+        'dark magenta', 'dark cyan', 'light gray', 'dark gray',
+        'light red', 'light green', 'yellow', 'light blue',
+        'light magenta', 'light cyan', 'white']
+    for _name in _colorNames:
+        for _settingSuffix in ("", "bold", "underline"):
+            palette.append((
+                "_".join(_name.split() + [_settingSuffix]).strip('_'),
+                ",".join([_name, _settingSuffix]).strip(','),
+                'default'))
+    
+    wClass = gui.MessageBox
+    wArgs = ["Console color test"]
+    alphabet = " abcedefghijklmnopqrstuvwxyz"
+
+    def test_colors(self):
+        for name in [x[0] for x in self.palette]:
+            self.w.body.append(u.Text((name, name + self.alphabet)))
+        return self.showBriefly(20)
+    
 
 class TestMessageBox(TestCase):
     wClass = gui.MessageBox
@@ -270,9 +295,11 @@ class TestGUI(TestCase):
             if random.randint(0,5) == 1:
                 ID = self.display.msgHeading(
                     "A new heading at step {:d}!", step)
-            if random.randint(0,3) == 1:
+            if random.randint(0,5) == 1:
                 self.display.msgBody(
                     ID, "Body stuff, step {:d}...", step)
+            elif random.randint(0,5) == 1:
+                self.display.msgOrphan("An orphan message at step {:d}", step)
             yield self.showBriefly(0.1)
         yield self.showBriefly(2.0)
 

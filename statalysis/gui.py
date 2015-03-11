@@ -37,7 +37,7 @@ class MessageBox(u.ListBox):
             self.body.set_focus(0)        
     
     def add(self, text):
-        self.body.append(u.Text(text))
+        self.body.append(u.Text(('message', text)))
         self.setCurrent(True)
         return len(self.body)
                             
@@ -52,10 +52,11 @@ class Messages(u.ListBox):
 
     """
     defaultHeight = 3
+    orphanHeading = ""
     
     def __init__(self):
         self.boxes = []
-        body = u.SimpleListWalker([])
+        body = u.SimpleFocusListWalker([])
         super(Messages, self).__init__(body)
 
     def adapt(self, w, height=None):
@@ -72,7 +73,12 @@ class Messages(u.ListBox):
         msgBox = self.adapt(MessageBox(text))
         self.body.append(msgBox)
 
-    def msg(self, text, ID):
+    def msg(self, text, ID=None):
+        if ID is None and ID not in self.boxes:
+            # Need a (blank) heading for orphan messages
+            self.boxes.append(None)
+            msgBox = self.adapt(MessageBox(self.orphanHeading))
+            self.body.append(msgBox)
         if ID not in self.boxes:
             raise IndexError(
                 "No heading for ID '{}'".format(ID))
@@ -86,8 +92,20 @@ class Messages(u.ListBox):
         if newHeight > self.defaultHeight:
             rawBox = self.body[k].original_widget
             self.body[k] = self.adapt(rawBox, newHeight)
-        # Set focus to this last-updated message
+        # Set focus to this last-added message
         self.body.set_focus(k)
+
+    def distinctMsg(self, label, text):
+        labelText = label.upper()
+        self.boxes.append(labelText)
+        text = [
+            "\n",
+            ('{}_label'.format(label), "{}:".format(labelText)),
+            (label, " " + text.strip()),
+            "\n",
+        ]
+        msgBox = self.adapt(MessageBox(text))
+        self.body.append(msgBox)
 
 
 class ProgressText(u.Text):
@@ -102,7 +120,9 @@ class ProgressText(u.Text):
         self.N = len(self.progressChars)
         super(ProgressText, self).__init__(self.pc())
 
-    def pc(self, k=0):
+    def pc(self, k=None):
+        if k is None:
+            return "+"
         return self.progressChars[k]
         
     def step(self):
@@ -163,7 +183,7 @@ class Files(u.GridFlow):
     processed.
     """
     gutterWidth = 2
-    minRightColWidth = 40
+    minRightColWidth = 30
     
     def __init__(self, fileNames, width):
         self.fileNames = fileNames
@@ -182,7 +202,11 @@ class Files(u.GridFlow):
         minCellWidth = self.leftColWidth + 1 +\
                        2*FileRow.gutterWidth + self.minRightColWidth
         nCols = floorRatio(totalWidth, minCellWidth)
-        return floorRatio(totalWidth, nCols), nCols
+        if nCols:
+            return floorRatio(totalWidth, nCols), nCols
+        # Not sure why nCols would ever come out zero, but this is a
+        # fail-safe
+        return totalWidth, 1
         
     def _row(self, fileName):
         return self.contents[self.fileNames.index(fileName)][0]
@@ -223,19 +247,28 @@ class GUI(object):
         # Name
         # 'fg color,setting', 'background color', 'mono setting'
         ('heading',
-         'dark cyan', 'default', 'bold'),
+         'dark cyan', 'default', 'default'),
         ('heading_current',
-         'yellow,bold', 'default', 'bold'),
+         'light cyan,underline', 'default', 'underline'),
+        ('message',
+         'white', 'default', 'default'),
+        ('error_label',
+         'light red,underline', 'default', 'underline'),
+        ('error',
+         'brown', 'default', 'default'),
+        ('warning_label',
+         'yellow,underline', 'default', 'underline'),
+        ('warning',
+         'brown', 'default', 'default'),
     ]
     
     def __init__(self):
+        self.running = False
         self.id_counter = 0
         # A screen is useful right away
         self.screen = Screen()
         self.screen.register_palette(self.palette)
-        self.screen.set_terminal_properties(
-            colors=16,
-            bright_is_bold=True)
+        self.screen.set_mouse_tracking(True)
 
     def start(self, fileNames):
         """
@@ -261,6 +294,7 @@ class GUI(object):
             main, screen=self.screen,
             unhandled_input=possiblyQuit, event_loop=eventLoop)
         reactor.addSystemEventTrigger('before', 'shutdown', self.stop)
+        self.running = True
         self.loop.start()
 
     def _dims(self):
@@ -271,6 +305,8 @@ class GUI(object):
         """
         Updates my display, possibly with an updated screen width.
         """
+        if not self.running:
+            return
         width, height = self._dims()
         # Update for new width
         if width != self.formerDims[0]:
@@ -285,6 +321,7 @@ class GUI(object):
         """
         self.screen.unhook_event_loop(self.loop)
         self.loop.stop()
+        self.running = False
     
     def msgHeading(self, textProto, *args):
         """
@@ -307,9 +344,34 @@ class GUI(object):
         single string after the integer ID, or a string prototype
         followed by one or more formatting arguments.
         """
-        self.m.msg(textProto.format(*args), ID)
+        text = textProto.format(*args)
+        self.m.msg(text, ID)
         self.update()
 
+    def msgOrphan(self, textProto, *args):
+        """
+        Adds a new line of message body under a (possibly blank) orphan
+        heading ID. You can supply a single string, or a string
+        prototype followed by one or more formatting arguments.
+        """
+        text = textProto.format(*args)
+        self.m.msg(text)
+        self.update()
+
+    def warning(self, textProto, *args):
+        """
+        Adds a distinctive warning message to the message window.
+        """
+        self.m.distinctMsg('warning', textProto.format(*args))
+        self.update()
+        
+    def error(self, textProto, *args):
+        """
+        Adds a distinctive error message to the message window.
+        """
+        self.m.distinctMsg('error', textProto.format(*args))
+        self.update()
+        
     def fileStatus(self, fileName, *args):
         """
         Updates the status entry for the specified fileName. With no

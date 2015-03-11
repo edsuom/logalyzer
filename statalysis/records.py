@@ -162,16 +162,22 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
             self.verbose = warnings
         self.pk = 0
         self.gui = gui
-    
+
     def shutdown(self):
         if self.trans is None:
             return defer.succeed(None)
         return self.trans.shutdown()
+
+    def len(self, records):
+        N = 0
+        for theseRecords in records.itervalues():
+            N += len(theseRecords)
+        return N
     
     def _purgeFromDB(self, ip):
         def donePurging(N):
             if N > 0:
-                self.msgBody("Purged DB of {:d} entries for IP {}", N, ip)
+                self.msgOrphan("Purged {:d} DB entries for IP {}", N, ip)
         
         if self.trans is None:
             return defer.succeed(0)
@@ -218,8 +224,8 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
             if result is None:
                 return 1
             if kNew != k:
-                self.msgBody(
-                    "WARNING: Conflicting record in DB: " +\
+                self.msgWarning(
+                    "Conflicting record in DB: " +\
                     "Timestamp {}, was at k={:d}, written as k={:d}",
                     str(dt), k, kNew)
                 return 1
@@ -230,20 +236,19 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
 
     @defer.inlineCallbacks
     def addRecords(self, records, fileName):
-        N = [0, 0]
-        self.msgHeading("Adding records from {}", fileName)
+        N = 0
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
                 self.addRecordToRecords(dt, thisRecord)
                 if self.trans:
-                    inc = yield self._addRecordToDB(
-                        dt, k, thisRecord).addErrback(self.oops)
+                    d = self._addRecordToDB(dt, k, thisRecord)
+                    d.addErrback(
+                        self.oops,
+                        "addRecords(<{:d} dt records>, {}",
+                        len(records), fileName)
                     self.fileProgress(fileName)
-                    N[0] += inc
-                N[1] += 1
-        self.msgBody(
-            "Added {:d} of {:d} records from {} to DB",
-            N[0], N[1], fileName)
+                    inc = yield d
+                    N += inc
         defer.returnValue(N)
     
     def getStuff(self):

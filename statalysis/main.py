@@ -229,10 +229,7 @@ class Recorder(Base):
         I generate and return a log reader with all its rules loaded 
         """
         rules = self.loadRules()
-        self.msgHeading("Exclusions")
         exclude = self.csvTextToList(self.opt['e'], int)
-        self.msgBody(
-            "HTTP Codes: {}", ", ".join([str(x) for x in exclude]))
         return logread.Reader(
             self.myDir,
             dbURL=self.opt['db'],
@@ -257,8 +254,11 @@ class Recorder(Base):
         
     def load(self):
         def allDone(null):
-            print "Done!"
-            reactor.stop()
+            self.msgHeading("All Done!")
+            if self.gui:
+                self.msgBody("Press 'q' to quit.")
+            else:
+                reactor.stop()
         
         d = self.reader.run()
         d.addCallbacks(self._doneReading, self.oops)
@@ -281,9 +281,10 @@ class Recorder(Base):
             outPath = self.opt['s']
             self.consolidate(outPath)
             return
-        self.reader = self.readerFactory()
         if self.opt['g']:
             self.gui = gui.GUI()
+        self.reader = self.readerFactory()
+        if self.gui:
             self.gui.start(self.reader.fileNames)
         reactor.callWhenRunning(self.load)
         kw = {'printRecords': self.opt['p'], 'gui': self.gui}

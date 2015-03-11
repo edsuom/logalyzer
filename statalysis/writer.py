@@ -38,7 +38,6 @@ class Writer(Base):
         for filePath in filePaths:
             thisType = filePath.split('.')[-1].upper()
             self.writeTypes[thisType] = filePath
-        self.verbose = kw.get('printRecords', False)
         self.gui = kw.get('gui', None)
     
     def ipToLong(self, ip):

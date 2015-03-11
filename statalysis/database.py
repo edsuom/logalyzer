@@ -219,18 +219,21 @@ class Transactor(AccessBroker, util.Base):
             values.append(ID)
         code = yield self.setEntry(dt, k, values)
         if code == 'p':
+            # Entry was already present
             result = k
         if code == 'c':
-            # Need to get a new sequence number for this entry
+            # Conflict with existing dt-k combination having differnt
+            # values; need to get a new sequence number for this entry
             maxSequence = yield self.getMaxSequence(dt)
             k = maxSequence + 1
             code = yield self.setEntry(dt, k, values)
             if code == 'c':
-                raise Exception("Couldn't add with new sequenc number!")
+                raise Exception("Couldn't add with new sequence number!")
             result = k
         elif code == 'a':
+            # New entry was added
             result = None
-        defer.returnValue(k)
+        defer.returnValue(result)
     
     @transact
     def getRecord(self, dt, k):

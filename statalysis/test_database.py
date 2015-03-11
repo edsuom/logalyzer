@@ -127,7 +127,7 @@ class TestTransactor(TestCase):
         cRecord = RECORDS[dt1][0]
         # Repeat of same record yields same sequence
         result = yield self.t.setRecord(dt1, 0, cRecord)
-        self.assertEqual(result, None)
+        self.assertEqual(result, 0)
         # Change URL and get new sequence
         cRecord['url'] = "/bogus.html"
         result = yield self.t.setRecord(dt1, 0, cRecord)
