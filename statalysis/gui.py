@@ -7,7 +7,10 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 """
 
+from twisted.internet import reactor
+
 import urwid as u
+from urwid.raw_display import Screen
 
 
 class MessageBox(u.ListBox):
@@ -85,34 +88,90 @@ class Messages(u.ListBox):
         self.body.set_focus(k)
 
 
+class ProgressText(u.Text):
+    """
+    Call my L{step} method to show progress with a spinning indicator,
+    and L{done} to blank out the indicator.
+    """
+    progressChars = "|/=\\"
+
+    def __init__(self):
+        self.k = 0
+        self.N = len(self.progressChars)
+        super(ProgressText, self).__init__(self.pc())
+
+    def pc(self, k=0):
+        return self.progressChars[k]
+        
+    def step(self):
+        self.k = (self.k + 1) % self.N
+        self.set_text(self.pc(self.k))
+
+    def done(self):
+        self.set_text(self.pc())
+
+
+class FileRow(u.ListBox):
+    """
+    I am one row of your status-updatable file list.
+    """
+    gutterWidth = 2
+
+    def __init__(self, fileName, leftColWidth):
+        self.p = ProgressText()
+        self.status = u.Text("", wrap='clip')
+        rowWidgets = u.Columns([
+            # File name
+            (leftColWidth, u.Text(fileName, align='right')),
+            # Progress indicator
+            (1, self.p),
+            # Status line
+            self.status,
+        ], dividechars=self.gutterWidth)
+        rowList = u.SimpleListWalker([rowWidgets])
+        super(FileRow, self).__init__(rowList)
+
+    def step(self):
+        self.p.step()
+
+    def done(self):
+        self.p.done()
+
+    def setStatus(self, text):
+        self.status.set_text(text)
+    
+        
 class Files(u.Pile):
     """
     I occupy most of the screen with a list of access log files being
     processed.
     """
-    gutterWidth = 2
-    
     def __init__(self, fileNames):
         self.fileNames = fileNames
-        self.leftColWidth = max([len(x) for x in fileNames])
-        widgetList = [(1, self._makeRow(x)) for x in fileNames]
+        leftColWidth = max([len(x) for x in fileNames])
+        widgetList = [(1, FileRow(x, leftColWidth)) for x in fileNames]
         super(Files, self).__init__(widgetList)
 
-    def _statusBox(self, text):
-        return u.Text("", wrap='clip')
-        
-    def _makeRow(self, fileName):
-        widgetList = [
-            (self.leftColWidth, u.Text(fileName, align='right')),
-            self._statusBox("")]
-        return u.Columns(widgetList, dividechars=self.gutterWidth)
-        
-    def setStatus(self, fileName, text):
+    def row(self, fileName):
+        return self.contents[self.fileNames.index(fileName)][0]
+    
+    def indicator(self, fileName):
+        """
+        Gives the progress indicator a spin to show progress being made on
+        the specified file.
+        """
+        self.row(fileName).step()
+    
+    def setStatus(self, fileName, textProto, *args):
+        """
+        Updates the status for the specified file with the supplied text,
+        clearing the progress indicator.
+        """
         if fileName not in self.fileNames:
             raise IndexError("Unknown filename '{}'".format(fileName))
-        k = self.fileNames.index(fileName)
-        rowWidget = self.contents[k][0]
-        rowWidget[1].set_text(text)
+        row = self.row(fileName)
+        row.done()
+        row.setStatus(textProto.format(*args))
 
     
 class GUI(object):
@@ -127,7 +186,7 @@ class GUI(object):
         ('heading_current',
          'yellow,bold', 'default', 'bold'),
     ]
-
+    
     def __init__(self, fileNames):
         self.id_counter = 0
         self.m = Messages()
@@ -170,7 +229,11 @@ class GUI(object):
             ID = self.id_counter
         self.messages.body(text, ID)
 
-    def fileStatus(self, fileName, text):
-        self.files.setStatus(fileName, text)
+    def fileStatus(self, fileName, *args):
+        if args:
+            self.f.setStatus(fileName, *args)
+        else:
+            self.f.indicator(fileName)
+
 
         

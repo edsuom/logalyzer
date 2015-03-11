@@ -24,8 +24,12 @@ Once there was a man from Devrizes
 who had balls of two different sizes.
 The one was so small
 it was no ball at all.
-But the other one several prizes.
+But the other won several prizes.
 """.strip().split('\n')
+
+FILENAMES = [
+    'foo.txt', 'bar.txt', 'really-cool-file.txt',
+    'lotsa-files.html', 'more-and-more.md']
 
 
 def deferToDelay(delay=5):
@@ -113,7 +117,8 @@ class TestMessages(TestCase):
         yield self.showBriefly()
         for line in LINES:
             self.w.msg(line, 1)
-            yield self.showBriefly()
+            yield self.showBriefly(1)
+        yield self.showBriefly(10)
 
     @defer.inlineCallbacks
     def test_several(self):
@@ -169,6 +174,69 @@ class TestMessagesWithFiller(TestCase):
                 self.m.msg("Adjust window size to see another update", step)
             yield self.showBriefly(0.1)
 
+
+class TestFileRow(TestCase):
+    wClass = gui.FileRow
+    wArgs = ['access.log', 20]
+
+    @defer.inlineCallbacks
+    def test_step(self):
+        for step in xrange(20):
+            self.w.step()
+            yield self.showBriefly(0.05)
+        self.w.done()
+        yield self.showBriefly()
+
+    def test_status(self):
+        self.w.setStatus("What a fine status we have!")
+        return self.showBriefly(2)
+
+
+class TestFilesAPI(tb.TestCase):
+    def setUp(self):
+        self.f = gui.Files(FILENAMES)
+
+    def test_setStatus(self):
+        fileName = "foo.txt"
+        self.f.setStatus(fileName, "Some message with an int {:d}!", 50)
+        row = self.f.contents[0][0]
+        statusText = row.status
+        self.assertEqual(
+            statusText.get_text()[0],
+            "Some message with an int 50!")
+        
             
+class TestFiles(TestCase):
+    def wInstance(self):
+        self.f = gui.Files(FILENAMES)
+        return u.Filler(self.f, valign='bottom')
+    
+    @defer.inlineCallbacks
+    def test_update(self):
+        for step in xrange(200):
+            fileName = random.choice(FILENAMES)
+            if random.randint(0,20) == 1:
+                self.f.setStatus(fileName, "Done at step {:d}!", step)
+            else:
+                self.f.indicator(fileName)
+            yield self.showBriefly(0.05)
+        yield self.showBriefly(2.0)
+            
+
+class TestGUI(TestCase):
+    def setUp(self):
+        self.display = gui.GUI(FILENAMES)
+        
+    @defer.inlineCallbacks
+    def test_update(self):
+        for step in xrange(200):
+            fileName = random.choice(FILENAMES)
+            if random.randint(0,20) == 1:
+                self.display.fileStatus(fileName, "Done at step {:d}!", step)
+            else:
+                self.display.fileStatus(fileName)
+            yield self.showBriefly(0.05)
+        yield self.showBriefly(2.0)
+
         
                 
