@@ -300,6 +300,9 @@ class TestGUI(TestCase):
                     ID, "Body stuff, step {:d}...", step)
             elif random.randint(0,5) == 1:
                 self.display.msgOrphan("An orphan message at step {:d}", step)
+            elif random.randint(0,15) == 1:
+                self.display.warning(
+                    "A warning message at step {:d}", step)
             yield self.showBriefly(0.1)
         yield self.showBriefly(2.0)
 

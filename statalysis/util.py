@@ -10,7 +10,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 import re, os, os.path
 from collections import deque
 
-from twisted.internet import defer
+from twisted.internet import reactor, defer
 
 
 def rdb(sep, *args):
@@ -111,14 +111,35 @@ class CacheManager(object):
 
 class BogusQueue(object):
     def __init__(self, **kw):
+        if kw.pop('useThreading', False):
+            self.threadPool = reactor.getThreadPool()
+        else:
+            self.threadPool = None
         for name, value in kw.iteritems():
             setattr(self, name, value)
-
+            
     def call(self, fName, *args, **kw):
+        """
+        Threading stuff copied from
+        twisted.internet.threads.deferToThreadPool
+        """
+        def done(success, result):
+            if success:
+                reactor.callFromThread(d.callback, result)
+            else:
+                reactor.callFromThread(d.errback, result)
+        
         f = getattr(self, fName)
+        if self.threadPool:
+            d = defer.Deferred()
+            self.threadPool.callInThreadWithCallback(
+                done, f, *args)
+            return d
         return defer.succeed(f(*args))
 
     def shutdown(self):
+        if self.threadPool:
+            self.threadPool.stop()
         return defer.suceed(None)
 
     

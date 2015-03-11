@@ -275,29 +275,18 @@ class Reader(Base):
     """
     I read and parse web server log files
     """
-    bogusQueue = True
+    bogusQueue = False
     
     def __init__(
             self, logDir, dbURL=None,
-            rules={}, vhost=None, exclude=[], ignoreSecondary=False,
             cores=None, verbose=False, info=False, warnings=False, gui=None):
         #----------------------------------------------------------------------
         self.myDir = logDir
         self.fileNames = self.getLogFiles()
         from records import MasterRecordKeeper
         self.rk = MasterRecordKeeper(dbURL, warnings=warnings, gui=gui)
-        parser = Parser(
-            self.getMatchers(rules),
-            vhost, exclude, ignoreSecondary, verbose=info)
-        if self.bogusQueue:
-            self.q = BogusQueue(parser=parser)
-        else:
-            if cores is None:
-                import multiprocessing as mp
-                cores = mp.cpu_count() - 1
-            else:
-                cores = int(cores)
-            self.q = ProcessQueue(cores, parser=parser)
+        self.cores = cores
+        self.info = info
         self.verbose = verbose
         self.gui = gui
 
@@ -314,6 +303,20 @@ class Reader(Base):
             if 'access.log' in fileName:
                 result.append(fileName)
         return result
+
+    def startQueue(self, parser, bogus=False, thread=False):
+        if bogus:
+            self.q = BogusQueue(parser=parser)
+            return
+        if thread:
+            self.q = BogusQueue(useThreading=True, parser=parse)
+            return
+        if self.cores is None:
+            import multiprocessing as mp
+            cores = mp.cpu_count() - 1
+        else:
+            cores = int(self.cores)
+        self.q = ProcessQueue(cores, parser=parser)
     
     @defer.inlineCallbacks
     def done(self, null):
@@ -324,7 +327,7 @@ class Reader(Base):
         self.msgBody("Master recordkeeper shut down")
         defer.returnValue(self.rk.getStuff())
             
-    def run(self):
+    def run(self, rules, vhost=None, exclude=[], ignoreSecondary=False):
         """
         Runs everything via the process queue (multiprocessing!),
         returning a reference to my main-process recordkeeper with all
@@ -371,6 +374,10 @@ class Reader(Base):
             d.addErrback(self.oops, "Parsing of '{}'", fileName)
             return d
         
+        parser = Parser(
+            self.getMatchers(rules),
+            vhost, exclude, ignoreSecondary, verbose=self.info)
+        self.startQueue(parser)
         dList = [dispatch(x) for x in self.fileNames]
         return defer.DeferredList(dList).addCallbacks(self.done, self.oops)
     

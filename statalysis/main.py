@@ -133,18 +133,20 @@ class RuleReader(Base):
     """
     def __init__(self, rulesDir='rules', gui=None, verbose=False):
         self.myDir = rulesDir
-        self.gui = None
+        self.gui = gui
         self.verbose = verbose
     
     def linerator(self, filePath):
+        N = 0
         self.msgHeading("Reading '{}'...", filePath)
         fh = open(filePath, 'rb')
         for line in fh:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            self.msgBody("| {}", line)
+            N += 1
             yield line
+        self.msgBody("{:d} rules", N)
         fh.close()
 
     def lines(self, filePath):
@@ -214,7 +216,7 @@ class Recorder(Base):
         if rulesDir is None:
             rulesDir = self.myDir
         rules = {}
-        rr = RuleReader(rulesDir, self.verbose)
+        rr = RuleReader(rulesDir, gui=self.gui, verbose=self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
             theseRules = rr.rules(extension, self.opt[optKey])
             rules[matcherName] = theseRules
@@ -228,13 +230,9 @@ class Recorder(Base):
         """
         I generate and return a log reader with all its rules loaded 
         """
-        rules = self.loadRules()
-        exclude = self.csvTextToList(self.opt['e'], int)
         return logread.Reader(
             self.myDir,
             dbURL=self.opt['db'],
-            rules=rules, vhost=self.opt['vhost'],
-            exclude=exclude, ignoreSecondary=self.opt['y'],
             cores=self.opt['cores'],
             verbose=self.verbose, info=self.opt['info'],
             warnings=self.opt['w'], gui=self.gui)
@@ -253,14 +251,21 @@ class Recorder(Base):
         return self.w.write(records)
         
     def load(self):
+        """
+        This is where it all happens.
+        """
         def allDone(null):
             self.msgHeading("All Done!")
             if self.gui:
                 self.msgBody("Press 'q' to quit.")
             else:
                 reactor.stop()
-        
-        d = self.reader.run()
+
+        d = self.reader.run(
+            self.loadRules(),
+            vhost=self.opt['vhost'],
+            exclude=self.csvTextToList(self.opt['e'], int),
+            ignoreSecondary=self.opt['y'])
         d.addCallbacks(self._doneReading, self.oops)
         d.addCallbacks(allDone, self.oops)
         return d
