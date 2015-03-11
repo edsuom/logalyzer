@@ -238,6 +238,13 @@ class GUI(object):
             bright_is_bold=True)
 
     def start(self, fileNames):
+        """
+        Constructs my widgets and starts my event loop and main loop.
+        """
+        def possiblyQuit(key):
+            if key in ('q', 'Q'):
+                reactor.stop()
+        
         # The top-level widgets
         self.m = Messages()
         self.f = Files(fileNames, self._dims()[0])
@@ -252,7 +259,7 @@ class GUI(object):
         self.formerDims = self._dims()
         self.loop = u.MainLoop(
             main, screen=self.screen,
-            unhandled_input=self.possiblyQuit, event_loop=eventLoop)
+            unhandled_input=possiblyQuit, event_loop=eventLoop)
         reactor.addSystemEventTrigger('before', 'shutdown', self.stop)
         self.loop.start()
 
@@ -261,6 +268,9 @@ class GUI(object):
         return [x-4 for x in self.screen.get_cols_rows()]
 
     def update(self):
+        """
+        Updates my display, possibly with an updated screen width.
+        """
         width, height = self._dims()
         # Update for new width
         if width != self.formerDims[0]:
@@ -268,14 +278,23 @@ class GUI(object):
         self.loop.draw_screen()
 
     def stop(self):
+        """
+        Tears down the GUI display. You shouldn't need to call this method
+        directly because it will be called when the reactor is shut
+        down.
+        """
         self.screen.unhook_event_loop(self.loop)
         self.loop.stop()
-
-    def possiblyQuit(self, key):
-        if key in ('q', 'Q'):
-            reactor.stop()
     
     def msgHeading(self, textProto, *args):
+        """
+        Sends a new heading to my scrolling message window. You can supply
+        a single string, or a string prototype followed by one or more
+        formatting arguments.
+
+        Returns a unique integer ID for this heading. Use that when
+        supplying lines of message body under this heading.
+        """
         self.id_counter += 1
         ID = self.id_counter
         self.m.heading(textProto.format(*args), ID)
@@ -283,10 +302,22 @@ class GUI(object):
         return ID
 
     def msgBody(self, ID, textProto, *args):
+        """
+        Adds a new line of message body under heading ID. You can supply a
+        single string after the integer ID, or a string prototype
+        followed by one or more formatting arguments.
+        """
         self.m.msg(textProto.format(*args), ID)
         self.update()
 
     def fileStatus(self, fileName, *args):
+        """
+        Updates the status entry for the specified fileName. With no
+        further arguments, the progress indicator for the file is
+        given a spin. With a string or string prototype followed by
+        formatting arguments, the progress indicator is reset and the
+        brief status text following the filename is updated.
+        """
         if args:
             self.f.setStatus(fileName, *args)
         else:

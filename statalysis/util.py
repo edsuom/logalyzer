@@ -132,6 +132,7 @@ class Base(object):
     show users from your calls to L{msgHeading} and L{msgBody}.
 
     """
+    gui = None
     verbose = False
 
     @property
@@ -152,18 +153,34 @@ class Base(object):
         return "{:4d}-{:02d}-{:02d}+{:02d}:{:02d}".format(
             dt.year, dt.month, dt.day,
             dt.hour, dt.minute)
-        
+    
     def msgHeading(self, proto, *args):
-        if self.verbose:
+        if self.gui:
+            self._headingID = self.gui.msgHeading(proto, *args)
+        elif self.verbose:
             proto = "\n" + proto
             args = list(args) + ["-"*70]
             proto += "\n{}"
             print proto.format(*args)
 
     def msgBody(self, proto, *args):
-        if self.verbose:
+        if self.gui:
+            self.gui.msgBody(self._headingID, proto, *args)
+        elif self.verbose:
             print proto.format(*args)
-            
+
+    def fileStatus(self, fileName, *args):
+        if self.gui:
+            self.gui.fileStatus(fileName, *args)
+        elif self.verbose:
+            proto = "File {}: " + args[0]
+            args = [fileName] + args[1:]
+            print proto.format(*args)
+
+    def fileProgress(self, fileName):
+        if self.gui:
+            self.gui.fileStatus(fileName)
+    
     def oops(self, failure, *args):
         from twisted.internet import reactor
         if reactor.running:

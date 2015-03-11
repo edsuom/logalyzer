@@ -238,12 +238,13 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
                 if self.trans:
                     inc = yield self._addRecordToDB(
                         dt, k, thisRecord).addErrback(self.oops)
-                    if self.verbose:
-                        N[0] += inc
-                        N[1] += 1
+                    self.fileProgress(fileName)
+                    N[0] += inc
+                N[1] += 1
         self.msgBody(
             "Added {:d} of {:d} records from {} to DB",
             N[0], N[1], fileName)
+        defer.returnValue(N)
     
     def getStuff(self):
         """

@@ -213,7 +213,6 @@ class Recorder(Base):
         rulesDir = self.opt['d']
         if rulesDir is None:
             rulesDir = self.myDir
-        self.msgHeading("Loading rules from '{}'", rulesDir)
         rules = {}
         rr = RuleReader(rulesDir, self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
@@ -233,8 +232,7 @@ class Recorder(Base):
         self.msgHeading("Exclusions")
         exclude = self.csvTextToList(self.opt['e'], int)
         self.msgBody(
-            "| HTTP Codes: {}", ", ".join([str(x) for x in exclude]),
-            noLeadingNewline=True)
+            "HTTP Codes: {}", ", ".join([str(x) for x in exclude]))
         return logread.Reader(
             self.myDir,
             dbURL=self.opt['db'],

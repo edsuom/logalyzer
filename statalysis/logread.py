@@ -314,11 +314,11 @@ class Reader(Base):
     
     @defer.inlineCallbacks
     def done(self, null):
-        self.msgBody("Shutting down processes...")
+        self.msgHeading("Shutting down")
         yield self.q.shutdown()
-        self.msgBody("Shutting down master recordkeeper...")
+        self.msgBody("Process queue shut down")
         yield self.rk.shutdown()
-        self.msgBody("Shutdowns complete")
+        self.msgBody("Master recordkeeper shut down")
         defer.returnValue(self.rk.getStuff())
             
     def run(self):
@@ -331,21 +331,31 @@ class Reader(Base):
         def gotSomeResults(results, fileName):
             if results:
                 ipList, records = results
-                self.msgBody("{}: {:d} purged IPs, {:d} records".format(
-                    fileName, len(ipList), len(records)))
+                self.fileStatus(
+                    fileName,
+                    "Purging {:d} IPs, adding {:d} records...",
+                    len(ipList), len(records))
                 for ip in ipList:
                     yield self.rk.purgeIP(ip).addErrback(
                         self.oops, "Trying to purge IP {}", ip)
-                yield self.rk.addRecords(
+                    self.fileProgress(fileName)
+                N = yield self.rk.addRecords(
                     records, fileName).addErrback(
                         self.oops, "Trying to add records for {}", fileName)
+                if N[0]:
+                    self.fileStatus(
+                        fileName,
+                        "Added {:d} of {:d} records to DB", N[0], N[1])
+                else:
+                    self.fileStatus(fileName, "{:d} records", N[1])
                 defer.returnValue(True)
             else:
                 # Retry
-                self.msgBody("RETRY: {}", fileName)
+                self.fileStatus(fileName, "Retrying...")
                 yield dispatch(fileName)
         
         def dispatch(fileName):
+            self.fileStatus(fileName, "Parsing...")
             d = self.q.call(
                 'parser', self.pathInDir(fileName), timeout=60*10)
             d.addCallback(gotSomeResults, fileName)
