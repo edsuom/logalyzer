@@ -7,6 +7,8 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 """
 
+import math
+
 from twisted.internet import reactor
 
 import urwid as u
@@ -117,8 +119,9 @@ class FileRow(u.ListBox):
     """
     gutterWidth = 2
 
-    def __init__(self, fileName, leftColWidth):
+    def __init__(self, fileName, leftColWidth, totalWidth):
         self.p = ProgressText()
+        self.leftColWidth = leftColWidth
         self.status = u.Text("", wrap='clip')
         rowWidgets = u.Columns([
             # File name
@@ -126,11 +129,18 @@ class FileRow(u.ListBox):
             # Progress indicator
             (1, self.p),
             # Status line
-            self.status,
+            (self._rightColWidth(totalWidth), self.status),
         ], dividechars=self.gutterWidth)
         rowList = u.SimpleListWalker([rowWidgets])
         super(FileRow, self).__init__(rowList)
 
+    def _rightColWidth(self, totalWidth):
+        return totalWidth - self.leftColWidth - 1 - 2*self.gutterWidth
+        
+    def updateWidth(self, width):
+        self.contents[2][1] = self.options(
+            'given', self._rightColWidth(width))
+    
     def step(self):
         self.p.step()
 
@@ -141,18 +151,33 @@ class FileRow(u.ListBox):
         self.status.set_text(text)
     
         
-class Files(u.Pile):
+class Files(u.GridFlow):
     """
     I occupy most of the screen with a list of access log files being
     processed.
     """
-    def __init__(self, fileNames):
+    gutterWidth = 2
+    minRightColWidth = 30
+    
+    def __init__(self, fileNames, width):
         self.fileNames = fileNames
-        leftColWidth = max([len(x) for x in fileNames])
-        widgetList = [(1, FileRow(x, leftColWidth)) for x in fileNames]
-        super(Files, self).__init__(widgetList)
+        self.leftColWidth = max([len(x) for x in fileNames])
+        cellWidth = self._cellWidth(width)[0]
+        widgetList = [
+            FileRow(x, self.leftColWidth, cellWidth) for x in fileNames]
+        super(Files, self).__init__(
+            widgetList, cellWidth, self.gutterWidth, 0, 'left')
 
-    def row(self, fileName):
+    def _cellWidth(self, totalWidth):
+        def floorRatio(x, y):
+            return int(math.floor(float(x)/y))
+        
+        minCellWidth = self.leftColWidth + 1 +\
+                       2*FileRow.gutterWidth + self.minRightColWidth
+        nCols = floorRatio(totalWidth, minCellWidth)
+        return floorRatio(totalWidth, nCols), nCols
+        
+    def _row(self, fileName):
         return self.contents[self.fileNames.index(fileName)][0]
     
     def indicator(self, fileName):
@@ -160,7 +185,7 @@ class Files(u.Pile):
         Gives the progress indicator a spin to show progress being made on
         the specified file.
         """
-        self.row(fileName).step()
+        self._row(fileName).step()
     
     def setStatus(self, fileName, textProto, *args):
         """
@@ -169,7 +194,7 @@ class Files(u.Pile):
         """
         if fileName not in self.fileNames:
             raise IndexError("Unknown filename '{}'".format(fileName))
-        row = self.row(fileName)
+        row = self._row(fileName)
         row.done()
         row.setStatus(textProto.format(*args))
 

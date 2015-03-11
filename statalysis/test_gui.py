@@ -41,18 +41,29 @@ def deferToDelay(delay=5):
 class Display(object):
     lifetime = 10 # seconds
     
-    def __init__(self, widget):
-        def possiblyQuit(key):
-            if key in ('q', 'Q'):
-                reactor.stop()
-
-        main = u.WidgetWrap(u.LineBox(widget))
-        eventLoop = u.TwistedEventLoop(reactor, manage_reactor=False)
+    def __init__(self):
+        # A screen is useful to have right away
         self.screen = Screen()
         self.screen.register_palette(gui.GUI.palette)
         self.screen.set_terminal_properties(
             colors=16,
             bright_is_bold=True)
+
+    def setWidget(self, widget, useFiller=False):
+        def possiblyQuit(key):
+            if key in ('q', 'Q'):
+                reactor.stop()
+
+        # The widget under test is outline, possibly padded with filler
+        outlined = u.LineBox(widget)
+        if useFiller:
+            height = 'flow' if hasattr(widget, 'rows') else 3
+            w = u.Filler(outlined, valign='top', height=height)
+        else:
+            w = outlined
+        main = u.WidgetWrap(w)
+        # The loops
+        eventLoop = u.TwistedEventLoop(reactor, manage_reactor=False)
         self.loop = u.MainLoop(
             main, screen=self.screen,
             unhandled_input=possiblyQuit,
@@ -60,6 +71,9 @@ class Display(object):
         reactor.addSystemEventTrigger('before', 'shutdown', self.stop)
         self.loop.start()
 
+    def width(self):
+        return self.screen.get_cols_rows()[0] - 2
+        
     def update(self):
         self.loop.draw_screen()
 
@@ -70,12 +84,14 @@ class Display(object):
         
 class TestCase(tb.TestCase):
     def setUp(self):
+        self.display = Display()
         if hasattr(self, 'wInstance'):
             self.w = self.wInstance()
         else:
             self.w = self.wClass(*getattr(self, 'wArgs', []))
-        self.display = Display(self.w)
-
+        self.display.setWidget(
+            self.w, useFiller=getattr(self, 'useFiller', False))
+    
     def tearDown(self):
         self.display.stop()
         
@@ -176,8 +192,9 @@ class TestMessagesWithFiller(TestCase):
 
 
 class TestFileRow(TestCase):
+    useFiller = True
     wClass = gui.FileRow
-    wArgs = ['access.log', 20]
+    wArgs = ['access.log', 20, 50]
 
     @defer.inlineCallbacks
     def test_step(self):
@@ -194,7 +211,7 @@ class TestFileRow(TestCase):
 
 class TestFilesAPI(tb.TestCase):
     def setUp(self):
-        self.f = gui.Files(FILENAMES)
+        self.f = gui.Files(FILENAMES, 100)
 
     def test_setStatus(self):
         fileName = "foo.txt"
@@ -204,21 +221,27 @@ class TestFilesAPI(tb.TestCase):
         self.assertEqual(
             statusText.get_text()[0],
             "Some message with an int 50!")
-        
+
+    def test_cellWidth(self):
+        self.f.leftColWidth = 10
+        width, nCols = self.f._cellWidth(100)
+        self.assertEqual(nCols, 2)
+        self.assertGreater(width, 40)
+
             
 class TestFiles(TestCase):
+    useFiller = True
     def wInstance(self):
-        self.f = gui.Files(FILENAMES)
-        return u.Filler(self.f, valign='bottom')
+        return gui.Files(FILENAMES, self.display.width())
     
     @defer.inlineCallbacks
     def test_update(self):
         for step in xrange(200):
             fileName = random.choice(FILENAMES)
             if random.randint(0,20) == 1:
-                self.f.setStatus(fileName, "Done at step {:d}!", step)
+                self.w.setStatus(fileName, "Done at step {:d}!", step)
             else:
-                self.f.indicator(fileName)
+                self.w.indicator(fileName)
             yield self.showBriefly(0.05)
         yield self.showBriefly(2.0)
             
