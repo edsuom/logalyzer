@@ -8,6 +8,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 """
 
 import re, gzip
+from copy import copy
 from datetime import datetime
 
 from twisted.internet import defer, reactor
@@ -275,6 +276,7 @@ class Reader(Base):
     """
     I read and parse web server log files
     """
+    timeout = 60*10 # Ten minutes per file
     bogusQueue = False
     
     def __init__(
@@ -304,88 +306,101 @@ class Reader(Base):
                 result.append(fileName)
         return result
 
-    def startProcessQueue(self, parser, bogus=False, thread=False):
+    def getProcessQueue(self, parser, bogus=False, thread=False):
         if self.cores is not None and int(self.cores) == 0:
             thread = True
         if bogus or thread:
-            self.qp = BogusQueue(useThreading=thread, parser=parser)
-            return
+            return BogusQueue(useThreading=thread, parser=parser)
         if self.cores is None:
             import multiprocessing as mp
             cores = mp.cpu_count() - 1
         else:
             cores = int(self.cores)
-        self.qp = ProcessQueue(cores, parser=parser)
+        return ProcessQueue(cores, parser=parser)
     
     @defer.inlineCallbacks
-    def done(self, null):
+    def done(self):
+        """
+        Call this after my run is done to shut everything down.
+        """
         self.msgHeading("Shutting down")
-        yield self.qp.shutdown()
+        yield self.pq.shutdown()
         self.msgBody("Process queue shut down")
         yield self.rk.shutdown()
         self.msgBody("Master recordkeeper shut down")
-        defer.returnValue(self.rk.getIPs())
             
     def run(self, rules, vhost=None, exclude=[], ignoreSecondary=False):
         """
         Runs everything via the process queue (multiprocessing!),
-        returning a reference to my main-process recordkeeper with all
-        the results in it.
+        returning a reference to a list of all IP addresses purged
+        during the run.
         """
         @defer.inlineCallbacks
         def gotSomeResults(results, fileName):
             if results:
-                if not dFirst.called:
-                    d = defer.Deferred()
-                    dFirst.chainDeferred(d)
-                    yield d
                 ipList, records = results
                 self.fileStatus(
-                    fileName, "Purging {:d} IPs", len(ipList))
-                for ip in ipList:
-                    yield self.rk.purgeIP(ip).addErrback(
-                        self.oops,
-                        "Trying to purge IP {} while processing '{}'",
-                        ip, fileName)
-                    self.fileProgress(fileName)
-                N_total = self.rk.len(records)
-                self.fileStatus(
-                    fileName,
-                    "Adding {:d} records", N_total)
-                d = self.rk.addRecords(records, fileName)
-                d.addErrback(
-                    self.oops,
-                    "Trying to add records for {}", fileName)
-                N_added = yield d
-                if N_added > 0:
-                    self.fileStatus(
-                        fileName,
-                        "Added {:d} of {:d} records to DB", N_added, N_total)
-                else:
-                    self.fileStatus(fileName, "{:d} records", N_total)
-                defer.returnValue(True)
+                    fileName, "{:d} purges, {:d} records",
+                    len(ipList), self.rk.len(records))
+                dq.put((results, fileName))
             else:
                 # Retry
+                self.msgWarning(
+                    "Timeout of parser for '{}', retrying", fileName)
                 self.fileStatus(fileName, "Retrying...")
                 yield dispatch(fileName)
         
         def dispatch(fileName):
             self.fileStatus(fileName, "Parsing...")
-            d = self.qp.call(
-                'parser', self.pathInDir(fileName), timeout=60*10)
+            d = self.pq.call(
+                'parser', self.pathInDir(fileName), timeout=self.timeout)
             d.addCallback(gotSomeResults, fileName)
             d.addErrback(self.oops, "Parsing of '{}'", fileName)
             return d
 
-        dList = []
+        @defer.inlineCallbacks
+        def resultsLoop(*args):
+            while filesLeft:
+                results, fileName = yield dq.get()
+                ipList, records = results
+                self.fileStatus(fileName, "Purging & adding...")
+                dList = []
+                for ip in ipList:
+                    d = self.rk.purgeIP(ip)
+                    d.addCallback(lambda _ : self.fileStatus(fileName))
+                    d.addErrback(
+                        self.oops,
+                        "Trying to purge IP {} while processing '{}'",
+                        ip, fileName)
+                    dList.append(d)
+                N_total = self.rk.len(records)
+                #self.fileStatus(
+                #    fileName,
+                #    "Adding {:d} records", N_total)
+                d = self.rk.addRecords(records, fileName)
+                d.addErrback(
+                    self.oops,
+                    "Trying to add records for {}", fileName)
+                N_added = yield d
+                self.fileStatus(
+                    fileName,
+                    "Added {:d} of {:d} records", N_added, N_total)
+                # Only now, after the records have all been added, do
+                # we wait for the low-priority IP purging
+                yield defer.DeferredList(dList)
+                filesLeft.remove(fileName)
+            defer.returnValue(self.rk.getIPs())
+        
         dq = defer.DeferredQueue()
-        dFirst = self.rk.startup()
+        filesLeft = copy(self.fileNames)
         parser = Parser(
             self.getMatchers(rules),
             vhost, exclude, ignoreSecondary, verbose=self.info)
-        self.startProcessQueue(parser)
+        self.pq = self.getProcessQueue(parser)
         # The files are all dispatched at once
         for fileName in self.fileNames:
-            dList.append(dispatch(x))
-        return defer.DeferredList(dList).addCallbacks(self.done, self.oops)
-    
+            # References to the deferreds are stored in the process
+            # queue, and we wait for their results. No need to keep
+            # references returned from dispatch calls.
+            dispatch(fileName)
+        return self.rk.startup().addCallback(resultsLoop, self.oops)    

@@ -246,6 +246,7 @@ class Recorder(Base):
         filePath = self.opt['s']
         if filePath:
             self.w.writeIPs(ipList, filePath)
+        return self.reader.done()
         
     def load(self):
         """

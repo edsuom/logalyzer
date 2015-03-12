@@ -160,7 +160,6 @@ class MasterRecordKeeper(Base):
 
     """
     def __init__(self, dbURL, warnings=False, echo=False, gui=None):
-        self.pk = 0
         self.ipList = []
         self.ipp = IPMatcher()
         self.trans = database.Transactor(dbURL, echo=echo)
@@ -173,8 +172,6 @@ class MasterRecordKeeper(Base):
         return self.trans.preload().addCallbacks(done, self.oops)
         
     def shutdown(self):
-        if self.trans is None:
-            return defer.succeed(None)
         return self.trans.shutdown()
 
     def len(self, records):

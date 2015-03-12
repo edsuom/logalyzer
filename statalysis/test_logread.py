@@ -11,6 +11,7 @@ import os.path
 from datetime import datetime as dt
 
 from twisted.python import failure
+from twisted.internet import defer
 
 import testbase as tb
 
@@ -142,29 +143,31 @@ class TestReader(tb.TestCase):
         import sift
         self.r = logread.Reader(
             os.path.join(tb.moduleDir(parent=True), 'log'),
-            rules={'BotMatcher': tb.RULES_BOT},
-            vhost="evolvingoutofeden.com",
-            cores=1, verbose=False,
-        )
+            "sqlite://", cores=1, verbose=False)
+        self.t = self.r.rk.trans
 
     def test_complains(self):
         self.assertRaises(OSError, logread.Reader, 'bogusdir')
-        
+
     def test_run(self):
+        @defer.inlineCallbacks
         def done(result):
             if isinstance(result, failure.Failure):
                 result.raiseException()
             else:
-                ipList, records = result
+                ipList = result
                 self.assertIsInstance(ipList, list)
                 self.assertTrue(len(ipList) > 1)
-                self.assertIsInstance(records, dict)
-                N = len(records)
-                self.assertTrue(
-                    N > 100,
-                    "Expected at least 100 records, got {:d}".format(N))
+                Ne = 2; N = yield self.t.hitsForIP("98.190.155.57")
+                # Why do I get N=0?
+                msg = "Expected at least {:d} records, got {:d}".format(Ne, N)
+                self.assertGreater(N, Ne, msg)
+                yield self.r.done()
         
-        return self.r.run().addBoth(done)
+        rules = {'BotMatcher': tb.RULES_BOT}
+        return self.r.run(
+            rules, vhost="evolvingoutofeden.com").addCallback(done)
+
         
 
             
