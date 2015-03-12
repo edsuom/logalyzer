@@ -22,6 +22,7 @@ class MessageBox(u.ListBox):
     """
     def __init__(self, text):
         self.hText = text
+        self.height = 1
         body = u.SimpleListWalker([self.headingText(True)])
         super(MessageBox, self).__init__(body)
 
@@ -39,8 +40,25 @@ class MessageBox(u.ListBox):
     def add(self, text):
         self.body.append(u.Text(('message', text)))
         self.setCurrent(True)
-        return len(self.body)
-                            
+        self.height += 1
+
+    def progress(self):
+        """
+        Call this to establish an incrementing line of dots as a progress
+        bar under my heading, and call each time a new dot is desired.
+        """
+        def pcText():
+            return ('message', "."*self.pc)
+        
+        if hasattr(self, 'pc'):
+            self.pc += 1
+            self.pcWidget.set_text(pcText())
+        else:
+            self.pc = 1
+            self.pcWidget = u.Text(pcText())
+            self.body.append(self.pcWidget)
+            self.height += 1
+
 
 class Messages(u.ListBox):
     """
@@ -73,12 +91,7 @@ class Messages(u.ListBox):
         msgBox = self.adapt(MessageBox(text))
         self.body.append(msgBox)
 
-    def msg(self, text, ID=None):
-        if ID is None and ID not in self.boxes:
-            # Need a (blank) heading for orphan messages
-            self.boxes.append(None)
-            msgBox = self.adapt(MessageBox(self.orphanHeading))
-            self.body.append(msgBox)
+    def _boxerator(self, ID):
         if ID not in self.boxes:
             raise IndexError(
                 "No heading for ID '{}'".format(ID))
@@ -87,25 +100,44 @@ class Messages(u.ListBox):
         for kk, msgBox in enumerate(self.body):
             if kk != k:
                 msgBox.setCurrent(False)
+        # Get and yield the MessageBox instance
+        msgBox = self.body[k]
+        # -----------------------
+        yield msgBox
+        # -----------------------
         # Add the message line under the heading
-        newHeight = self.body[k].add(text)
+        newHeight = msgBox.height
         if newHeight > self.defaultHeight:
             rawBox = self.body[k].original_widget
             self.body[k] = self.adapt(rawBox, newHeight)
         # Set focus to this last-added message
         self.body.set_focus(k)
+        
+    def msg(self, text, ID=None):
+        if ID is None and ID not in self.boxes:
+            # Need a (blank) heading for orphan messages
+            self.boxes.append(None)
+            msgBox = self.adapt(MessageBox(self.orphanHeading))
+            self.body.append(msgBox)
+        # Orphan or not, there should be a heading now
+        for msgBox in self._boxerator(ID):
+            msgBox.add(text)
 
     def distinctMsg(self, label, text):
         labelText = label.upper()
         self.boxes.append(labelText)
-        text = [
-            "\n",
-            ('{}_label'.format(label), "{}:".format(labelText)),
-            (label, " " + text.strip()),
-            "\n",
-        ]
-        msgBox = self.adapt(MessageBox(text))
+        height = 2
+        msgText = [
+            "\n", ('{}_label'.format(label), "{}:".format(labelText))]
+        for line in text.split('\n'):
+            height += 1
+            msgText.append((label, "\n" + line.rstrip()))
+        msgBox = self.adapt(MessageBox(msgText), height=height)
         self.body.append(msgBox)
+
+    def progress(self, ID):
+        for msgBox in self._boxerator(ID):
+            msgBox.progress()
 
 
 class ProgressText(u.Text):
@@ -138,6 +170,7 @@ class FileRow(u.ListBox):
     I am one row of your status-updatable file list.
     """
     gutterWidth = 2
+    minRightColWidth = 30
 
     def __init__(self, fileName, leftColWidth, totalWidth):
         self.p = ProgressText()
@@ -183,12 +216,11 @@ class Files(u.GridFlow):
     processed.
     """
     gutterWidth = 2
-    minRightColWidth = 30
     
     def __init__(self, fileNames, width):
         self.fileNames = fileNames
         self.leftColWidth = max([len(x) for x in fileNames])
-        cellWidth = self._cellWidth(width)[0]
+        cellWidth, nCols = self._cellWidth(width)
         widgetList = [
             u.BoxAdapter(FileRow(x, self.leftColWidth, cellWidth), 1)
             for x in fileNames]
@@ -197,12 +229,15 @@ class Files(u.GridFlow):
 
     def _cellWidth(self, totalWidth):
         def floorRatio(x, y):
-            return int(math.floor(float(x)/y))
+            ratio = float(x) / y
+            return int(math.floor(ratio))
         
-        minCellWidth = self.leftColWidth + 1 +\
-                       2*FileRow.gutterWidth + self.minRightColWidth
+        minCellWidth = \
+            self.leftColWidth + 1 +\
+            2*FileRow.gutterWidth + FileRow.minRightColWidth
         nCols = floorRatio(totalWidth, minCellWidth)
         if nCols:
+            totalWidth -= self.gutterWidth*(nCols-1)
             return floorRatio(totalWidth, nCols), nCols
         # Not sure why nCols would ever come out zero, but this is a
         # fail-safe
@@ -276,6 +311,7 @@ class GUI(object):
         """
         def possiblyQuit(key):
             if key in ('q', 'Q'):
+                self.warning("Stopping...")
                 reactor.stop()
         
         # The top-level widgets
@@ -371,6 +407,9 @@ class GUI(object):
         """
         self.m.distinctMsg('error', textProto.format(*args))
         self.update()
+
+    def msgProgress(self, ID):
+        self.m.progress(ID)
         
     def fileStatus(self, fileName, *args):
         """

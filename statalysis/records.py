@@ -174,10 +174,12 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
             N += len(theseRecords)
         return N
     
-    def _purgeFromDB(self, ip):
+    def _purgeFromDB(self, ip, ID):
         def donePurging(N):
             if N > 0:
-                self.msgOrphan("Purged {:d} DB entries for IP {}", N, ip)
+                self.msgBody(
+                    "Purged {:d} DB entries for IP {}",
+                    N, ip, ID=ID)
         
         if self.trans is None:
             return defer.succeed(0)
@@ -199,10 +201,16 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
 
         Overrides L{ParserRecordKeeper.purgeIP}.
         """
+        def done(null):
+            self.msgBody("Done", ID=ID)
+        
         if ip in self.ipList:
             # Already purged
             return defer.succeed(None)
-        dList = [self._purgeFromDB(ip).addErrback(self.oops)]
+        ID = self.msgHeading("Purging IP address {}", ip)
+        dList = [self._purgeFromDB(ip, ID).addErrback(self.oops)]
+        # Any benefit to running in a thread instead of just this?
+        #self._purgeFromRecords(ip)
         dList.append(
             threads.deferToThread(
                 self._purgeFromRecords, ip).addErrback(self.oops))
@@ -210,12 +218,12 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
         self.ipList.append(ip)
         # Return the deferred for the record and (possible) database
         # purge
-        return defer.DeferredList(dList)
+        return defer.DeferredList(dList).addCallback(done)
 
     def _addRecordToDB(self, dt, k, record):
         """
-        Adds the supplied record to my database (if I'm running one) for
-        the specified datetime-sequence combination dt-k.
+        Called if I'm running a database to add the supplied record to it
+        for the specified datetime-sequence combination dt-k.
 
         Returns 1 if a new entry was written, 0 if not. Use that
         result to increment a counter.
@@ -223,20 +231,23 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
         def done(result):
             if result is None:
                 return 1
-            if kNew != k:
+            if result != k:
                 self.msgWarning(
                     "Conflicting record in DB: " +\
                     "Timestamp {}, was at k={:d}, written as k={:d}",
-                    str(dt), k, kNew)
+                    str(dt), k, result)
                 return 1
             return 0
-        
+
         return self.trans.setRecord(
             dt, k, record).addCallbacks(done, self.oops)
 
     @defer.inlineCallbacks
     def addRecords(self, records, fileName):
         N = 0
+        count = 0
+        ID = self.msgHeading(
+            "Adding {:d} records for '{}'", self.len(records), fileName)
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
                 self.addRecordToRecords(dt, thisRecord)
@@ -244,11 +255,14 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
                     d = self._addRecordToDB(dt, k, thisRecord)
                     d.addErrback(
                         self.oops,
-                        "addRecords(<{:d} dt records>, {}",
-                        len(records), fileName)
+                        "addRecords(<{:d} records>, {}",
+                        self.len(records), fileName)
                     self.fileProgress(fileName)
                     inc = yield d
                     N += inc
+                count += 1
+                if not count % 10:
+                    self.msgProgress(ID)
         defer.returnValue(N)
     
     def getStuff(self):

@@ -170,23 +170,40 @@ class Base(object):
     def myDir(self):
         del self._myDir
 
-    def dtFormat(self, dt):
+    @staticmethod
+    def dtFormat(dt):
         return "{:4d}-{:02d}-{:02d}+{:02d}:{:02d}".format(
             dt.year, dt.month, dt.day,
             dt.hour, dt.minute)
     
     def msgHeading(self, proto, *args):
+        """
+        Sends a new message heading to the GUI or console, returning a
+        integer that is unique to the caller's instance of me and that
+        will be the ID for the next L{msgBody} call(s) from this
+        instance.
+        """
         if self.gui:
             self._headingID = self.gui.msgHeading(proto, *args)
-        elif self.verbose:
+            return self._headingID
+        if self.verbose:
             proto = "\n" + proto
             args = list(args) + ["-"*70]
             proto += "\n{}"
             print proto.format(*args)
 
-    def msgBody(self, proto, *args):
+    def msgBody(self, proto, *args, **kw):
+        """
+        Send a new line of message body to the last heading for this
+        instance, or the instance whose ID is specified via the
+        keyword C{ID}.
+        """
         if self.gui:
-            self.gui.msgBody(self._headingID, proto, *args)
+            # The get/if structure lets you explicitly specify ID=None
+            ID = kw.get('ID', None)
+            if ID is None:
+                ID = self._headingID
+            self.gui.msgBody(ID, proto, *args)
         elif self.verbose:
             print proto.format(*args)
 
@@ -201,7 +218,14 @@ class Base(object):
             self.gui.warning(proto, *args)
         elif self.verbose:
             print "WARNING: "+proto.format(*args)
-    
+
+    def msgProgress(self, ID=None):
+        if not self.gui:
+            return
+        if ID is None:
+            ID = self._headingID
+        self.gui.msgProgress(ID)
+            
     def fileStatus(self, fileName, *args):
         if self.gui:
             self.gui.fileStatus(fileName, *args)

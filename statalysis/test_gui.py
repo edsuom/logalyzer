@@ -149,6 +149,13 @@ class TestMessageBox(TestCase):
             self.w.add(line)
             self.w.setCurrent(isCurrent)
             yield self.showBriefly(1.0)
+
+    @defer.inlineCallbacks
+    def test_progress(self):
+        self.w.add("The next line is a progress indicator")
+        for k in xrange(20):
+            self.w.progress()
+            yield self.showBriefly(0.1)
             
         
 class TestMessages(TestCase):
@@ -238,22 +245,27 @@ class TestFileRow(TestCase):
 
 class TestFilesAPI(tb.TestCase):
     def setUp(self):
-        self.f = gui.Files(FILENAMES, 100)
+        self.f = gui.Files(FILENAMES[1:], 100)
 
     def test_setStatus(self):
         fileName = "foo.txt"
         self.f.setStatus(fileName, "Some message with an int {:d}!", 50)
         row = self.f.contents[0][0]
-        statusText = row.status
         self.assertEqual(
-            statusText.get_text()[0],
+            row.status.get_text()[0],
             "Some message with an int 50!")
 
     def test_cellWidth(self):
         self.f.leftColWidth = 10
         width, nCols = self.f._cellWidth(100)
         self.assertEqual(nCols, 2)
-        self.assertGreater(width, 40)
+        self.assertGreater(width, 45)
+        width, nCols = self.f._cellWidth(120)
+        self.assertEqual(nCols, 2)
+        self.assertGreater(width, 55)
+        width, nCols = self.f._cellWidth(140)
+        self.assertEqual(nCols, 3)
+        self.assertGreater(width, 45)
 
             
 class TestFiles(TestCase):

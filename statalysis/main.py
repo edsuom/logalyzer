@@ -101,7 +101,8 @@ Just consolidate IP addresses in the <file> with those in the ip rules
 net, ua, bot, and ref rules, and doesn't generate any csv file
 
 --cores N
-The number of CPU cores (really, python processes) to run in parallel
+The number of CPU cores (really, python processes) to run in
+parallel. Set to 0 and the queue will run in a threadpool instead.
 
 -v, --verbose
 Run verbosely
@@ -292,7 +293,8 @@ class Recorder(Base):
         if self.gui:
             self.gui.start(self.reader.fileNames)
         reactor.callWhenRunning(self.load)
-        kw = {'printRecords': self.opt['p'], 'gui': self.gui}
+        kw = {'printRecords': self.opt['p']}
+        # We don't use GUI with writer, even though we could
         self.w = Writer(*list(self.opt), **kw)
         reactor.run()
 

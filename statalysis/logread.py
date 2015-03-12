@@ -305,11 +305,10 @@ class Reader(Base):
         return result
 
     def startQueue(self, parser, bogus=False, thread=False):
-        if bogus:
-            self.q = BogusQueue(parser=parser)
-            return
-        if thread:
-            self.q = BogusQueue(useThreading=True, parser=parse)
+        if self.cores is not None and int(self.cores) == 0:
+            thread = True
+        if bogus or thread:
+            self.q = BogusQueue(useThreading=thread, parser=parser)
             return
         if self.cores is None:
             import multiprocessing as mp
