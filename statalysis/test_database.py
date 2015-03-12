@@ -66,33 +66,27 @@ class TestTransactor(TestCase):
         self.dbPath = "file.db"
         self.t = database.Transactor(
             "sqlite:///{}".format(self.dbPath))
+        return self.t.preload()
     
     @defer.inlineCallbacks
     def tearDown(self):
         for ip in (ip1, ip2):
             yield self.t.purgeIP(ip)
         yield self.t.shutdown()
-    
+
+    @defer.inlineCallbacks
     def test_setEntry(self):
-        def cb1(result):
-            self.assertEqual(result, 'a')
-            self.assertTrue(os.path.isfile(self.dbPath))
-            return self.t.setEntry(
-                dt1, 1, values).addCallback(cb2)
-
-        def cb2(result):
-            self.assertEqual(result, 'a')
-            return self.t.setEntry(
-                dt1, 1, values).addCallback(cb3)
-
-        def cb3(result):
-            self.assertEqual(result, 'p')
-            values[0] = 404
-            return self.t.setEntry(
-                dt1, 1, values).addCallback(self.assertEqual, 'c')
-
         values = makeEntry(200, False, ip1)
-        return self.t.setEntry(dt1, 0, values).addCallback(cb1)
+        code = yield self.t.setEntry(dt1, 0, values)
+        self.assertEqual(code, 'a')
+        self.assertTrue(os.path.isfile(self.dbPath))
+        code = yield self.t.setEntry(dt1, 1, values)
+        self.assertEqual(code, 'a')
+        code = yield self.t.setEntry(dt1, 1, values)
+        self.assertEqual(code, 'p')
+        values[0] = 404
+        code = yield self.t.setEntry(dt1, 1, values)
+        self.assertEqual(code, 'c')
 
     @defer.inlineCallbacks
     def test_setRecord(self):

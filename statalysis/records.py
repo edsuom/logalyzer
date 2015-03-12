@@ -13,6 +13,7 @@ from twisted.internet import defer, threads
 
 
 from util import Base
+from sift import IPMatcher
 import database
 
 
@@ -150,19 +151,27 @@ class MasterRecordKeeper(Base):
     """
     I am the master record keeper that gets fed info from the
     subprocesses. I operate with deferreds; supply a database URL to
-    my constructor and I will do the recordkeeping persistently via
-    that database, too.
+    my constructor so I can do the recordkeeping persistently via that
+    database.
+
+    Call my L{startup} method right away and then my transactions can
+    make use of L{DTK} and {sift.IPMatcher} instances via I{dtk} and
+    I{ipm} attributes to avoid database activity.
+
     """
-    def __init__(self, dbURL=None, warnings=False, echo=False, gui=None):
-        self.ipList = []
-        if dbURL is None:
-            self.trans = None
-        else:
-            self.trans = database.Transactor(dbURL, echo=echo)
-            self.verbose = warnings
+    def __init__(self, dbURL, warnings=False, echo=False, gui=None):
         self.pk = 0
+        self.ipList = []
+        self.ipp = IPMatcher()
+        self.trans = database.Transactor(dbURL, echo=echo)
+        self.verbose = warnings
         self.gui = gui
 
+    def startup(self):
+        def done(result):
+            self.ipm = result
+        return self.trans.preload().addCallbacks(done, self.oops)
+        
     def shutdown(self):
         if self.trans is None:
             return defer.succeed(None)
@@ -173,19 +182,6 @@ class MasterRecordKeeper(Base):
         for theseRecords in records.itervalues():
             N += len(theseRecords)
         return N
-    
-    def _purgeFromDB(self, ip, ID):
-        def donePurging(N):
-            if N > 0:
-                # NOTE: Why does this never seem to happen?
-                self.msgBody(
-                    "Purged {:d} DB entries for IP {}",
-                    N, ip, ID=ID)
-
-        # Deleting unwanted entries is a low-priority activity
-        # compared to everything else
-        return self.trans.purgeIP(
-            ip, niceness=10).addCallbacks(donePurging, self.oops)
     
     def purgeIP(self, ip):
         """
@@ -200,23 +196,32 @@ class MasterRecordKeeper(Base):
 
         Overrides L{ParserRecordKeeper.purgeIP}.
         """
-        def done(null):
-            self.msgBody("Done", ID=ID)
+        def donePurging(N):
+            self.msgBody(
+                "Purged {:d} DB entries for IP {}",
+                N, ip, ID=ID)
 
-        # NOTE: I have (temporarily?) disabled the purging
-        if True or ip in self.ipList:
-            # Already purged
+        if self.ipp(ip):
             return defer.succeed(None)
-        ID = self.msgHeading("Purging IP address {}", ip)
-        # Add the IP to our purged list
+        # Add the IP to our purged IP matcher and list
+        self.ipp.addIP(ip)
         self.ipList.append(ip)
-        # Return the deferred for the database purge
-        return self._purgeFromDB(ip, ID).addCallbacks(done, self.oops)
+        if not self.ipm(ip):
+            return defer.succeed(None)
+        # The in-database IP matcher says it's in the database...
+        self.ipm.removeIP(ip)
+        # ...so it needs to be removed, though the actual DB
+        # transaction is very low priority because our IP matcher
+        # was just updated
+        ID = self.msgHeading("Purging IP address {}", ip)
+        return self.trans.purgeIP(
+            ip, niceness=10).addCallbacks(donePurging, self.oops)
 
-    def _addRecordToDB(self, dt, k, record):
+    def addRecord(self, dt, k, record):
         """
-        Called if I'm running a database to add the supplied record to it
-        for the specified datetime-sequence combination dt-k.
+        Called to add the supplied record to the database for the
+        specified datetime-sequence combination dt-k, if it's not
+        already there.
 
         Returns 1 if a new entry was written, 0 if not. Use that
         result to increment a counter.
@@ -232,6 +237,7 @@ class MasterRecordKeeper(Base):
                 return 1
             return 0
 
+        self.ipm.addIP(record['ip'])
         return self.trans.setRecord(
             dt, k, record).addCallbacks(done, self.oops)
 
@@ -243,7 +249,7 @@ class MasterRecordKeeper(Base):
             "Adding {:d} records for '{}'", self.len(records), fileName)
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
-                d = self._addRecordToDB(dt, k, thisRecord)
+                d = self.addRecord(dt, k, thisRecord)
                 d.addErrback(
                     self.oops,
                     "addRecords(<{:d} records>, {}",

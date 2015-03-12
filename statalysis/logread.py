@@ -304,23 +304,23 @@ class Reader(Base):
                 result.append(fileName)
         return result
 
-    def startQueue(self, parser, bogus=False, thread=False):
+    def startProcessQueue(self, parser, bogus=False, thread=False):
         if self.cores is not None and int(self.cores) == 0:
             thread = True
         if bogus or thread:
-            self.q = BogusQueue(useThreading=thread, parser=parser)
+            self.qp = BogusQueue(useThreading=thread, parser=parser)
             return
         if self.cores is None:
             import multiprocessing as mp
             cores = mp.cpu_count() - 1
         else:
             cores = int(self.cores)
-        self.q = ProcessQueue(cores, parser=parser)
+        self.qp = ProcessQueue(cores, parser=parser)
     
     @defer.inlineCallbacks
     def done(self, null):
         self.msgHeading("Shutting down")
-        yield self.q.shutdown()
+        yield self.qp.shutdown()
         self.msgBody("Process queue shut down")
         yield self.rk.shutdown()
         self.msgBody("Master recordkeeper shut down")
@@ -335,6 +335,10 @@ class Reader(Base):
         @defer.inlineCallbacks
         def gotSomeResults(results, fileName):
             if results:
+                if not dFirst.called:
+                    d = defer.Deferred()
+                    dFirst.chainDeferred(d)
+                    yield d
                 ipList, records = results
                 self.fileStatus(
                     fileName, "Purging {:d} IPs", len(ipList))
@@ -367,16 +371,21 @@ class Reader(Base):
         
         def dispatch(fileName):
             self.fileStatus(fileName, "Parsing...")
-            d = self.q.call(
+            d = self.qp.call(
                 'parser', self.pathInDir(fileName), timeout=60*10)
             d.addCallback(gotSomeResults, fileName)
             d.addErrback(self.oops, "Parsing of '{}'", fileName)
             return d
-        
+
+        dList = []
+        dq = defer.DeferredQueue()
+        dFirst = self.rk.startup()
         parser = Parser(
             self.getMatchers(rules),
             vhost, exclude, ignoreSecondary, verbose=self.info)
-        self.startQueue(parser)
-        dList = [dispatch(x) for x in self.fileNames]
+        self.startProcessQueue(parser)
+        # The files are all dispatched at once
+        for fileName in self.fileNames:
+            dList.append(dispatch(x))
         return defer.DeferredList(dList).addCallbacks(self.done, self.oops)
     

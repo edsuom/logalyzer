@@ -12,6 +12,7 @@ from twisted.internet import defer
 from sasync.database import transact, SA, AccessBroker
 
 import util
+from sift import IPMatcher
 
 
 class DTK(object):
@@ -69,6 +70,7 @@ class Transactor(AccessBroker, util.Base):
     """
     I handle transactions for an efficient database of logfile
     entries.
+
     """
     directValues = ['http', 'was_rd', 'ip']
     indexedValues = ['vhost', 'url', 'ref', 'ua']
@@ -79,7 +81,7 @@ class Transactor(AccessBroker, util.Base):
         """
         Sets up caches for values written to the indexed value tables
         """
-        # We uses huge caches because DB access is so slow
+        # We use huge caches because DB access is so slow
         self.cm = util.CacheManager(200)
         self.cachedValues = {}
         for name in self.indexedValues:
@@ -108,7 +110,32 @@ class Transactor(AccessBroker, util.Base):
                 SA.Column('value', SA.String(255)),
             )
 
+    @transact
+    def preload(self):
+        """
+        Loads DTK and IPMatcher objects from database (can take a while,
+        but do it while waiting for the first result from the log
+        reader processes).
+        """
+        self.dtk = DTK()
+        ipm = IPMatcher()
+        col = self.entries.c
+        for sh in self.selectorator(col.dt, col.k, col.ip):
+            pass
+        rp = sh()
+        rows = rp.fetchmany()
+        while rows:
+            for row in rows:
+                self.dtk.set(row[0], row[1])
+                ipm.addIP(row[2], ignoreCache=True)
+            rows = rp.fetchmany()
+        return ipm
+
     def getEntry(self, dt, k):
+        """
+        Returns all of the columns after dt, k for one unique dt-k
+        combination in the entries table.
+        """
         col = self.entries.c
         if not self.s('s_entry'):
             cList = [getattr(col, x) for x in self.colNames]
@@ -116,8 +143,8 @@ class Transactor(AccessBroker, util.Base):
                 cList,
                 SA.and_(col.dt == SA.bindparam('dt'),
                         col.k == SA.bindparam('k')))
-        return self.s().execute(dt=dt, k=k).fetchone()
-            
+        return self.s().execute(dt=dt, k=k).first()
+
     @transact
     def setEntry(self, dt, k, values):
         """
@@ -139,13 +166,6 @@ class Transactor(AccessBroker, util.Base):
                     return 'c'
             return 'p'
 
-        if not hasattr(self, 'dtk'):
-            # Setup dt-k in-memory lookup tree (for speedup)
-            col = self.entries.c
-            for sh in self.selectorator(col.dt, col.k):
-                pass
-            rows = sh().fetchall()
-            self.dtk = DTK(rows)
         # Check the lookup tree first
         if self.dtk.check(dt, k):
             # There appears to be a dt-k entry already...
@@ -171,7 +191,7 @@ class Transactor(AccessBroker, util.Base):
         table = getattr(self, name)
         if not self.s("s_{}".format(name)):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
-        row = self.s().execute(value=value).fetchone()
+        row = self.s().execute(value=value).first()
         if row:
             return row[0]
         rp = table.insert().execute(value=value)
@@ -182,7 +202,7 @@ class Transactor(AccessBroker, util.Base):
         if not self.s('max_sequence'):
             c = self.entries.c
             self.s([SA.func.max(c.k)], c.dt == SA.bindparam('dt'))
-        return self.s().execute(dt=dt).fetchone()[0]
+        return self.s().execute(dt=dt).first()[0]
     
     @defer.inlineCallbacks
     def setRecord(self, dt, k, record):
@@ -210,7 +230,7 @@ class Transactor(AccessBroker, util.Base):
                 # Cached ID
                 ID = valueDict[value]
             else:
-                # Get ID from DB for value, at higher priority
+                # Get ID from DB for value, at high priority
                 ID = yield self.setNameValue(name, value, niceness=-15)
                 discardedValue = self.cm.set(name, value)
                 if discardedValue in valueDict:
@@ -222,7 +242,7 @@ class Transactor(AccessBroker, util.Base):
             # Entry was already present
             result = k
         if code == 'c':
-            # Conflict with existing dt-k combination having differnt
+            # Conflict with existing dt-k combination having different
             # values; need to get a new sequence number for this entry
             maxSequence = yield self.getMaxSequence(dt)
             k = maxSequence + 1
@@ -250,7 +270,7 @@ class Transactor(AccessBroker, util.Base):
             cols = getattr(getattr(self, name), 'c')
             for sh in self.selectorator(cols.value):
                 sh.where(cols.id == ID)
-            result[name] = sh().fetchone()[0]
+            result[name] = sh().first()[0]
         return result
 
     @transact
@@ -280,7 +300,7 @@ class Transactor(AccessBroker, util.Base):
         cols = self.entries.c
         for sh in self.selectorator(SA.func.count(cols.http)):
             sh.where(cols.ip == ip)
-        return sh().fetchone()[0]
+        return sh().first()[0]
 
 
                 

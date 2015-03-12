@@ -45,6 +45,7 @@ class TestMasterRecordKeeper(TestCase):
             warnings=True,
         )
         self.t = self.rk.trans
+        return self.rk.startup()
     
     @defer.inlineCallbacks
     def tearDown(self):
@@ -54,11 +55,12 @@ class TestMasterRecordKeeper(TestCase):
         
     @defer.inlineCallbacks
     def test_addRecords(self):
+        N_expected = [2, 1]
         yield self.rk.addRecords(RECORDS, "access.log")
-        self.failUnlessEqual(self.rk.records, RECORDS)
-        N = yield self.t.hitsForIP(ip1)
-        self.failUnlessEqual(N, 2)
-        
+        for k, ip in enumerate([ip1, ip2]):
+            N = yield self.t.hitsForIP(ip)
+            self.assertEqual(N, N_expected[k])
+            self.assertTrue(self.rk.ipm(ip))
             
 
     

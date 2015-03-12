@@ -8,6 +8,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 """
 
 import re, os.path, array
+from bisect import bisect
 
 
 import ipcalc
@@ -19,7 +20,7 @@ class MatcherBase(object):
     """
     Build your matcher on me
     """
-    def __init__(self, rules):
+    def __init__(self, rules=[]):
         clean = []
         for rule in rules:
             rule = rule.strip()
@@ -47,21 +48,22 @@ class MatcherBase(object):
 
 class IPMatcher(MatcherBase):
     """
-    I efficiently match IP addresses to individual known
-    offenders. Simple and fast, no caching.
+    I efficiently match IP addresses. Simple and fast.
+
+    Construct me with a list of IP addresses in dotted-quad format,
+    and add any further ones with L{addIP}.
+
     """
     def startup(self, rules):
+        self.N = 0
         # Lookup table for hashed ip strings
         self.ipHashes = array.array('L')
         for ip in rules:
-            self.addOffender(ip)
-        # Prep for binary searches
-        self.N = len(self.ipHashes)
-        self.ipHashes = sorted(self.ipHashes)
-        # Cache for offenders
-        self.cm.new()
-        # Cache for innocents
-        self.cm.new()
+            self.addIP(ip, ignoreCache=True)
+        # Cache for hits
+        self.cm.new(20)
+        # Cache for misses
+        self.cm.new(20)
 
     def dqToHash(self, ip):
         """
@@ -74,15 +76,39 @@ class IPMatcher(MatcherBase):
             long(byte) << 8 * index
             for index, byte in enumerate(ip.split('.')))
             
-    def addOffender(self, ip):
+    def addIP(self, ip, ignoreCache=False):
         """
         Call this with an IP address (string format) to add it to my list
-        of offenders. As a bonus, returns the ip address in long 
+        if it's not already there.
         """
         ipHash = self.dqToHash(ip)
-        if ipHash not in self.ipHashes:
+        if not self.N:
+            # The first one is special
+            self.N = 1
             self.ipHashes.append(ipHash)
+            return
+        k = bisect(self.ipHashes, ipHash)
+        if k < self.N and self.ipHashes[k] == ipHash:
+            return
+        self.N += 1
+        # Insert new IP hash where it would have been
+        self.ipHashes.insert(k, ipHash)
+        if ignoreCache:
+            return
+        # Clear the misses cache of this IP
+        self.cm.clear(0, ip)
 
+    def removeIP(self, ip):
+        """
+        Call this with an IP address (string format) to remove it from my
+        list if it's there.
+        """
+        ipHash = self.dqToHash(ip)
+        k = bisect(self.ipHashes, ipHash)
+        if k < self.N and self.ipHashes[k] == ipHash:
+            del self.ipHashes[k]
+            self.N -= 1
+    
     def hasHash(self, ipHash):
         """
         Binary search, adapted from
@@ -94,27 +120,28 @@ class IPMatcher(MatcherBase):
             if kMax < kMin:
                 return False
             k = (kMin  + kMax) // 2
-            if self.ipHashes[k] < ipHash:
+            x = self.ipHashes[k]
+            if x < ipHash:
                 kMin = k + 1
-            elif self.ipHashes[k] > ipHash:
+            elif x > ipHash:
                 kMax = k - 1
             else:
                 return True
             
     def __call__(self, ip):
-        # Likely to be several sequential hits from offenders and
-        # innocents alike
+        # Likely to be several sequential hits from hits and
+        # misses alike
         if self.cm.check(0, ip):
-            # Offender was cached
+            # Hit was cached
             return True
         if self.cm.check(1, ip):
-            # Innocent was cached
+            # Miss was cached
             return False
         if self.hasHash(self.dqToHash(ip)):
-            # Offender found
+            # IP found
             self.cm.set(0, ip)
             return True
-        # No offending IP address match
+        # No IP address match
         self.cm.set(1, ip)
         return False
 

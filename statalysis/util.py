@@ -60,12 +60,19 @@ class CacheManager(object):
         self.names.append(name)
         return k
     
-    def clear(self, value=None):
-        for cache in self.caches:
-            if value is None:
-                cache.clear()
-            while cache.count(value):
-                cache.remove(value)
+    def clear(self, k=None, value=None):
+        """
+        Clears all caches (or just the specified one) of all values (or
+        just the specified value).
+        """
+        if k is not None:
+            kk = self._checkIndex(k)
+        for j, cache in enumerate(self.caches):
+            if k is None or j == kk:
+                if value is None:
+                    cache.clear()
+                while cache.count(value):
+                    cache.remove(value)
 
     def _checkIndex(self, k):
         if not isinstance(k, int):
