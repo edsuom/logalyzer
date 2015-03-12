@@ -311,6 +311,8 @@ class GUI(object):
         """
         def possiblyQuit(key):
             if key in ('q', 'Q'):
+                # NOTE: The warning doesn't show up when program
+                # hangs, but does quit.
                 self.warning("Stopping...")
                 reactor.stop()
         

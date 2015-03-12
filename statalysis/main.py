@@ -238,18 +238,14 @@ class Recorder(Base):
             verbose=self.verbose, info=self.opt['info'],
             warnings=self.opt['w'], gui=self.gui)
 
-    def _doneReading(self, stuff):
+    def _doneReading(self, ipList):
         """
-        Callback to process an ipList and records returned from my reader.
+        Callback to process an ipList returned from my reader.
         """
-        ipList, records = stuff
         # Save the IP addresses from purges if that option set
         filePath = self.opt['s']
         if filePath:
             self.w.writeIPs(ipList, filePath)
-        # Now write the actual records, returning the deferred from
-        # the writer
-        return self.w.write(records)
         
     def load(self):
         """
@@ -293,9 +289,7 @@ class Recorder(Base):
         if self.gui:
             self.gui.start(self.reader.fileNames)
         reactor.callWhenRunning(self.load)
-        kw = {'printRecords': self.opt['p']}
-        # We don't use GUI with writer, even though we could
-        self.w = Writer(*list(self.opt), **kw)
+        self.w = Writer()
         reactor.run()
 
 

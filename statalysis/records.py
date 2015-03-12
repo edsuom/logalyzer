@@ -146,7 +146,7 @@ class ParserRecordKeeper(object):
         return self.ipList, newRecords
 
 
-class MasterRecordKeeper(ParserRecordKeeper, Base):
+class MasterRecordKeeper(Base):
     """
     I am the master record keeper that gets fed info from the
     subprocesses. I operate with deferreds; supply a database URL to
@@ -154,7 +154,7 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
     that database, too.
     """
     def __init__(self, dbURL=None, warnings=False, echo=False, gui=None):
-        super(MasterRecordKeeper, self).__init__()
+        self.ipList = []
         if dbURL is None:
             self.trans = None
         else:
@@ -177,12 +177,11 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
     def _purgeFromDB(self, ip, ID):
         def donePurging(N):
             if N > 0:
+                # NOTE: Why does this never seem to happen?
                 self.msgBody(
                     "Purged {:d} DB entries for IP {}",
                     N, ip, ID=ID)
-        
-        if self.trans is None:
-            return defer.succeed(0)
+
         # Deleting unwanted entries is a low-priority activity
         # compared to everything else
         return self.trans.purgeIP(
@@ -203,22 +202,16 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
         """
         def done(null):
             self.msgBody("Done", ID=ID)
-        
-        if ip in self.ipList:
+
+        # NOTE: I have (temporarily?) disabled the purging
+        if True or ip in self.ipList:
             # Already purged
             return defer.succeed(None)
         ID = self.msgHeading("Purging IP address {}", ip)
-        dList = [self._purgeFromDB(ip, ID).addErrback(self.oops)]
-        # Any benefit to running in a thread instead of just this?
-        #self._purgeFromRecords(ip)
-        dList.append(
-            threads.deferToThread(
-                self._purgeFromRecords, ip).addErrback(self.oops))
         # Add the IP to our purged list
         self.ipList.append(ip)
-        # Return the deferred for the record and (possible) database
-        # purge
-        return defer.DeferredList(dList).addCallback(done)
+        # Return the deferred for the database purge
+        return self._purgeFromDB(ip, ID).addCallbacks(done, self.oops)
 
     def _addRecordToDB(self, dt, k, record):
         """
@@ -250,23 +243,21 @@ class MasterRecordKeeper(ParserRecordKeeper, Base):
             "Adding {:d} records for '{}'", self.len(records), fileName)
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
-                self.addRecordToRecords(dt, thisRecord)
-                if self.trans:
-                    d = self._addRecordToDB(dt, k, thisRecord)
-                    d.addErrback(
-                        self.oops,
-                        "addRecords(<{:d} records>, {}",
-                        self.len(records), fileName)
-                    self.fileProgress(fileName)
-                    inc = yield d
-                    N += inc
+                d = self._addRecordToDB(dt, k, thisRecord)
+                d.addErrback(
+                    self.oops,
+                    "addRecords(<{:d} records>, {}",
+                    self.len(records), fileName)
+                self.fileProgress(fileName)
+                inc = yield d
+                N += inc
                 count += 1
                 if not count % 10:
                     self.msgProgress(ID)
         defer.returnValue(N)
     
-    def getStuff(self):
+    def getIPs(self):
         """
-        Returns a list of purged IP addresses and all my records.
+        Returns a list of purged IP addresses
         """
-        return self.ipList, self.records
+        return self.ipList

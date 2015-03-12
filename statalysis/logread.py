@@ -324,7 +324,7 @@ class Reader(Base):
         self.msgBody("Process queue shut down")
         yield self.rk.shutdown()
         self.msgBody("Master recordkeeper shut down")
-        defer.returnValue(self.rk.getStuff())
+        defer.returnValue(self.rk.getIPs())
             
     def run(self, rules, vhost=None, exclude=[], ignoreSecondary=False):
         """
