@@ -19,18 +19,15 @@ sa [--vhost somehost.com]
    [--omit] [-y, --secondary]
    [-s, --save <file to save purged IPs>]
    [-v, --verbose]
-<file> <file...>
+dbURL [logfiles...]
 
 
 DESCRIPTION
 
-Analyzes log files in the directory where outFile is to go, producing
-one or more output <files> (except if -c option set).
-
-The format of the output files is determined by their extension:
-
-.csv: Comma-separated (actually tabs) values, one row for each record
-.pyo: Marshalled lists, read back by iterating marshal.load(fh)
+Using the database who RFC-1738 url is supplied as the first (and
+possibly only) argument, analyzes the log files listed in further
+arguments, or in the director(ies) listed, or in the current
+directory if there are no further arguments.
 
 Specify particular ip, net, ua, bot, or ref rules in the rules
 directory with a comma-separated list after the -i, -n, -u, -b, or -r
@@ -44,7 +41,8 @@ WARNING: If any of your bot-detecting rules that purge IP addresses
 '/robots.txt', don't use the saved list (--save) to block access to
 your web server!
 
-You can skim through the CSV file with:
+You can generate a CSV file with the -f option and a filename. Skim
+through it with:
 
 less -x5,8,12,16,21,52,69,75,110,200 -S <file.csv>
 
@@ -53,13 +51,6 @@ OPTIONS
 
 --vhost vhost
 A particular virtual host of interest
-
--p, --print
-Print records after loading
-
---db dburl
-Specify the RFC-1738 url of a database for the records and it will be
-updated as the logfiles are parsed.
 
 -e, --exclude exclude
 Exclude HTTP code(s) (comma separated list, no spaces)
@@ -90,6 +81,9 @@ sensitive) that match referrer strings indicating a malicious bot
 
 -y, --secondary
 Ignore secondary files (css, webfonts, images)
+
+-f, --csvfile file
+CSV file to write records to
 
 -s, --save file
 File in which to save a list of the purged (or consolidated) IP
@@ -203,8 +197,20 @@ class Recorder(Base):
     def __init__(self, opt):
         self.opt = opt
         self.verbose = opt['v']
-        self.csvFilePath = opt[0]
-        self.myDir = self.dirOfPath(self.csvFilePath)
+
+    def parseArgs(self):
+        args = list(self.opt)
+        self.dbURL = args[0]
+        # Logfiles specified by command-line args after the db
+        # url. Can be logfiles or directories containing logfiles. If
+        # none specified, the logfiles in my current directory will be
+        # used.
+        self.logFiles = []
+        pattern = 'access.log'
+        for arg in args[1:]:
+            self.logFiles.extend(self.filesInDir(path=arg, pattern=pattern))
+        if not self.logFiles:
+            self.logFiles = self.filesInDir(pattern=pattern)
 
     def loadRules(self, consolidate=False):
         """
@@ -227,13 +233,13 @@ class Recorder(Base):
                 return theseRules
         return rules
         
-    def readerFactory(self):
+    def readerFactory(self, dbURL, writer=None):
         """
         I generate and return a log reader with all its rules loaded 
         """
         return logread.Reader(
-            self.myDir,
-            dbURL=self.opt['db'],
+            self.logFiles, dbURL,
+            writer=writer,
             cores=self.opt['cores'],
             verbose=self.verbose, info=self.opt['info'],
             warnings=self.opt['w'], gui=self.gui)
@@ -284,13 +290,18 @@ class Recorder(Base):
             outPath = self.opt['s']
             self.consolidate(outPath)
             return
+        self.parseArgs()
         if self.opt['g']:
             self.gui = gui.GUI()
-        self.reader = self.readerFactory()
-        if self.gui:
-            self.gui.start(self.reader.fileNames)
+            self.gui.start(self.logFiles)
+        # Writer
+        fileTypes = []
+        if self.opt['f']:
+            fileTypes.append(self.opt['f'])
+        self.w = Writer(fileTypes)
+        # Reader, which may call the writer
+        self.reader = self.readerFactory(self.opt[0], self.w)
         reactor.callWhenRunning(self.load)
-        self.w = Writer()
         reactor.run()
 
 

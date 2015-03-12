@@ -7,7 +7,7 @@ LICENSE
 Copyright (C) 2015 Tellectual LLC
 """
 
-import csv, marshal
+import csv
 
 from twisted.internet import defer, task
 
@@ -17,7 +17,8 @@ from util import Base
 
 class Writer(Base):
     """
-    I write stuff to files in various formats.
+    I write stuff to files in various line formats. Currently just CSV
+    is supported.
     """
     csvDelimiter = '\t'
 
@@ -32,13 +33,13 @@ class Writer(Base):
         ('ua',    "User Agent"),
     )
     
-    def __init__(self, *filePaths, **kw):
+    def __init__(self, filePaths, gui=None):
         self.dList = []
         self.writeTypes = {}
         for filePath in filePaths:
             thisType = filePath.split('.')[-1].upper()
             self.writeTypes[thisType] = filePath
-        self.gui = kw.get('gui', None)
+        self.gui = gui
     
     def ipToLong(self, ip):
         """
@@ -114,16 +115,10 @@ class Writer(Base):
         rowBase = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
         self._cw.writerow(rowBase + self.makeRow(record))
 
-    def _setupPYO(self, filePath):
-        self._fhPYO = open(filePath, 'wb')
-        return self._fhPYO.close
-    
-    def _writePYO(self, dt, k, record):
-        marshal.dump([self.dtFormat(dt), k, record], self._fhPYO)
-            
+    @defer.inlineCallbacks
     def write(self, records):
         """
-        Writes records to all desired formats, returning a deferred that
+        Writes some records to all desired formats, returning a deferred that
         fires when the writing is done.
 
         Each _writeXXX method is run cooperatively with the twisted
@@ -134,27 +129,25 @@ class Writer(Base):
                 for thisWriter in writers:
                     yield thisWriter(dt, k, thisRecord)
 
-        def setupDone(null):
-            # Now write them records!
-            d = task.Cooperator().coiterate(runWriters())
-            d.addCallbacks(doneWriting, self.oops)
-            return d
+        if not hasattr(self, 'writers'):
+            self.writers = []
+            # Prepare my writers
+            for writeType, filePath in self.writeTypes.iteritems():
+                thisSetterUpper = getattr(self, "_setup{}".format(writeType))
+                thisWriter = getattr(self, "_write{}".format(writeType))
+                writers.append(thisWriter)
+                sd = yield defer.maybeDeferred(
+                    thisSetterUpper, filePath).addErrback(self.oops)
+                self.writers.append((thisWriter, sd))
+        # Now write some records!
+        yield task.Cooperator().coiterate(
+            runWriters()).addErrback(self.oops)
 
-        @defer.deferredGenerator
-        def doneWriting(null):
-            for shutterDowner in sdList:
-                yield defer.waitForDeferred(
-                    defer.maybeDeferred(shutterDowner))
-
+    def close(self):
+        """
+        Close my writers
+        """
         dList = []
-        sdList = []
-        writers = []
-        # Prepare my writers
-        for writeType, filePath in self.writeTypes.iteritems():
-            thisSetterUpper = getattr(self, "_setup{}".format(writeType))
-            thisWriter = getattr(self, "_write{}".format(writeType))
-            writers.append(thisWriter)
-            d = defer.maybeDeferred(thisSetterUpper, filePath)
-            d.addCallbacks(sdList.append, self.oops)
-            dList.append(d)
-        return defer.DeferredList(dList).addCallbacks(setupDone, self.oops)
+        for null, shutterDowner in self.writers:
+            dList.append(defer.maybeDeferred(shutterDowner))
+        return defer.DeferredList(dList)

@@ -163,6 +163,12 @@ class Base(object):
     gui = None
     verbose = False
 
+    @classmethod
+    def linger(cls, setting=None):
+        if setting is not None:
+            cls._pleaseLinger = setting
+        return getattr(cls, '_pleaseLinger', False)
+    
     @property
     def myDir(self):
         return getattr(self, '_myDir', os.curdir)
@@ -182,6 +188,12 @@ class Base(object):
         return "{:4d}-{:02d}-{:02d}+{:02d}:{:02d}".format(
             dt.year, dt.month, dt.day,
             dt.hour, dt.minute)
+
+    @staticmethod
+    def deferToDelay(delay):
+        d = defer.Deferred()
+        reactor.callLater(delay, d.callback, None)
+        return d
     
     def msgHeading(self, proto, *args):
         """
@@ -223,6 +235,7 @@ class Base(object):
     def msgWarning(self, proto, *args):
         if self.gui:
             self.gui.warning(proto, *args)
+            self.linger(True)
         elif self.verbose:
             print "WARNING: "+proto.format(*args)
 
@@ -253,40 +266,58 @@ class Base(object):
         text += "\n {}".format(failure.getTraceback())
         if self.gui:
             self.gui.error(text)
-        else:
-            from twisted.internet import reactor
-            if reactor.running:
-                try:
-                    reactor.stop()
-                except:
-                    pass
-            self.msgHeading("ERROR: {}", text)
+            self.linger(True)
+            return self.deferToDelay(10)
+        from twisted.internet import reactor
+        if reactor.running:
+            try:
+                reactor.stop()
+            except:
+                pass
+        self.msgHeading("ERROR: {}", text)
     
     def csvTextToList(self, text, converter):
         if text:
             return [converter(x.strip()) for x in text.split(',')]
         return []
 
-    def dirOfPath(self, filePath):
-        return os.path.dirname(os.path.abspath(filePath))
-
-    def filesInDir(self):
-        """
-        Lists names (not paths) of files in my directory
-        """
-        return os.listdir(self.myDir)
-
-    def checkPath(self, filePath):
+    @staticmethod
+    def checkPath(filePath):
         if not os.path.isfile(filePath):
             raise ValueError("No file '{}' found".format(filePath))
-                               
+    
+    @staticmethod
+    def dirOfPath(filePath):
+        return os.path.dirname(os.path.abspath(filePath))
+
+    def filesInDir(self, path=None, pattern=None):
+        """
+        Returns a list of names (not paths) of files in my instance's
+        directory I{myDir}, or the directory specified. If the
+        "directory" is actually a file, returns a single-item list
+        with just that filename.
+
+        If you specify a pattern string, only files containing the
+        pattern will be included.
+        """
+        if path is None:
+            path = self.myDir
+        if os.path.isfile(path):
+            fileList = [path]
+        else:
+            fileList = os.listdir(path)
+        if pattern is None:
+            return fileList
+        results = []
+        for fileName in fileList:
+            if pattern in fileName:
+                results.append(fileName)
+        return results
+    
     def pathInDir(self, fileName):
         """
         Returns the absolute path of a file in my directory
         """
-        if os.path.split(fileName)[0]:
-            raise ValueError(
-                "Path '{}' specified, use file name only".format(fileName))
         path = os.path.abspath(os.path.join(self.myDir, fileName))
         self.checkPath(path)
         return path

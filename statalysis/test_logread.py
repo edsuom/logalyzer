@@ -140,10 +140,11 @@ class TestParser(tb.TestCase):
                            
 class TestReader(tb.TestCase):
     def setUp(self):
-        import sift
+        logFiles = [
+            os.path.join(tb.moduleDir(parent=True), 'log', 'access.log')]
         self.r = logread.Reader(
-            os.path.join(tb.moduleDir(parent=True), 'log'),
-            "sqlite://", cores=1, verbose=False)
+            logFiles, "sqlite://",
+            cores=1, verbose=False)
         self.t = self.r.rk.trans
 
     def test_complains(self):

@@ -280,13 +280,13 @@ class Reader(Base):
     bogusQueue = False
     
     def __init__(
-            self, logDir, dbURL=None,
+            self, logFiles, dbURL, writer=None,
             cores=None, verbose=False, info=False, warnings=False, gui=None):
         #----------------------------------------------------------------------
-        self.myDir = logDir
-        self.fileNames = self.getLogFiles()
+        self.fileNames = logFiles
         from records import MasterRecordKeeper
         self.rk = MasterRecordKeeper(dbURL, warnings=warnings, gui=gui)
+        self.w = writer
         self.cores = cores
         self.info = info
         self.verbose = verbose
@@ -297,13 +297,6 @@ class Reader(Base):
         for matcherName, ruleList in rules.iteritems():
             thisMatcher = getattr(sift, matcherName)(ruleList)
             result[matcherName] = thisMatcher
-        return result
-        
-    def getLogFiles(self):
-        result = []
-        for fileName in self.filesInDir():
-            if 'access.log' in fileName:
-                result.append(fileName)
         return result
 
     def getProcessQueue(self, parser, bogus=False, thread=False):
@@ -328,6 +321,8 @@ class Reader(Base):
         self.msgBody("Process queue shut down")
         yield self.rk.shutdown()
         self.msgBody("Master recordkeeper shut down")
+        if self.linger():
+            yield self.deferToDelay(10)
             
     def run(self, rules, vhost=None, exclude=[], ignoreSecondary=False):
         """
@@ -343,6 +338,8 @@ class Reader(Base):
                     fileName, "{:d} purges, {:d} records",
                     len(ipList), self.rk.len(records))
                 dq.put((results, fileName))
+                if self.w:
+                    dWriteList.append(self.w.write(records))
             else:
                 # Retry
                 self.msgWarning(
@@ -389,8 +386,13 @@ class Reader(Base):
                 # we wait for the low-priority IP purging
                 yield defer.DeferredList(dList)
                 filesLeft.remove(fileName)
+            # Wait for any file writes and closes, too
+            yield defer.DeferredList(dWriteList)
+            if self.w:
+                yield self.w.close()
             defer.returnValue(self.rk.getIPs())
-        
+
+        dWriteList = []
         dq = defer.DeferredQueue()
         filesLeft = copy(self.fileNames)
         parser = Parser(

@@ -92,8 +92,13 @@ class Transactor(AccessBroker, util.Base):
     def startup(self):
         yield self.table(
             'entries',
-            SA.Column('dt', SA.DateTime, primary_key=True),
-            SA.Column('k', SA.SmallInteger, primary_key=True),
+            SA.Column(
+                'dt', SA.DateTime,
+                primary_key=True),
+            SA.Column(
+                'k', SA.SmallInteger,
+                primary_key=True,
+                autoincrement=False),
             SA.Column('http', SA.SmallInteger, nullable=False),
             SA.Column('was_rd', SA.Boolean, nullable=False),
             SA.Column('ip', SA.String(15), nullable=False),
