@@ -339,11 +339,7 @@ class Reader(Base):
                 self.fileStatus(
                     fileName, "{:d} purges, {:d} records",
                     len(ipList), N_records)
-                dq.put((result, fileName))
-                # Put the low-priority DB and (possibly) file writes
-                # in the write-deferred list
-                dWriteList.append(self.t.setFileInfo(
-                    fileName, dtFile, N_records, niceness=15))
+                dq.put((dtFile, result, fileName))
                 if self.w:
                     dWriteList.append(self.w.write(records))
             else:
@@ -355,27 +351,34 @@ class Reader(Base):
 
         def dispatch(fileName):
             def gotInfo(result):
-                if result and result[0] == dtFile:
-                    self.fileStatus(fileName, "{:d} records", result[1])
-                    dq.put((None, fileName))
+                if result:
+                    self.msgBody("DB datetime: {}", result[0], ID=ID)
+                    if result[0] == dtFile:
+                        self.fileStatus(fileName, "{:d} records", result[1])
+                        dq.put((None, None, fileName))
+                        return
                 else:
-                    self.fileStatus(fileName, "Parsing...")
-                    d = self.pq.call(
-                        'parser', filePath, timeout=self.timeout)
-                    d.addCallback(gotSomeResults, fileName, dtFile)
-                    d.addErrback(self.oops, "Parsing of '{}'", fileName)
-                    return d
-            
+                    self.msgBody("No DB entry", ID=ID)
+                self.fileStatus(fileName, "Parsing...")
+                d = self.pq.call(
+                    'parser', filePath, timeout=self.timeout)
+                d.addCallback(gotSomeResults, fileName, dtFile)
+                d.addErrback(self.oops, "Parsing of '{}'", fileName)
+                return d
+
+            ID = self.msgHeading("Checking for '{}' update", fileName)
             filePath = self.pathInDir(fileName)
             dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
+            self.msgBody("File datetime: {}", dtFile, ID=ID)
+            # TODO: WHY is the bottom line not working????
             return gotInfo(None)
-            return self.t.getFileInfo(
-                fileName).addCallbacks(gotInfo, self.oops)
+            #return self.t.getFileInfo(
+            #    fileName).addCallbacks(gotInfo, self.oops)
 
         @defer.inlineCallbacks
         def resultsLoop(*args):
             while filesLeft:
-                result, fileName = yield dq.get()
+                dtFile, result, fileName = yield dq.get()
                 filesLeft.remove(fileName)
                 if result is None:
                     # Non-parsed file, reflected already in DB
@@ -403,8 +406,12 @@ class Reader(Base):
                 self.fileStatus(
                     fileName,
                     "Added {:d} of {:d} records", N_added, N_total)
+                # Write the files entry into the DB only now that its
+                # records have been accounted for
+                dList.append(self.t.setFileInfo(
+                    fileName, dtFile, N_total, niceness=15))
                 # Only now, after the records have all been added, do
-                # we wait for the low-priority IP purging
+                # we wait for the low-priority IP purging and DB write
                 yield defer.DeferredList(dList)
             # Wait for any file writes and closes, too
             yield defer.DeferredList(dWriteList)
