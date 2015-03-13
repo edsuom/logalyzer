@@ -63,31 +63,34 @@ class TestDTK(TestCase):
 
 class TestTransactor(TestCase):
     def setUp(self):
-        self.dbPath = "file.db"
-        self.t = database.Transactor(
-            "sqlite:///{}".format(self.dbPath))
+        # In-memory database
+        self.t = database.Transactor("sqlite://", echo=True)
         return self.t.preload()
     
-    @defer.inlineCallbacks
     def tearDown(self):
-        for ip in (ip1, ip2):
-            yield self.t.purgeIP(ip)
-        yield self.t.shutdown()
-
+        return self.t.shutdown()
+    
     @defer.inlineCallbacks
     def test_setEntry(self):
         values = makeEntry(200, False, ip1)
+        # Add new entry for first k
         code = yield self.t.setEntry(dt1, 0, values)
         self.assertEqual(code, 'a')
-        self.assertTrue(os.path.isfile(self.dbPath))
+        # Add new entry for second k
         code = yield self.t.setEntry(dt1, 1, values)
         self.assertEqual(code, 'a')
+        # Set duplicate entry for first k
         code = yield self.t.setEntry(dt1, 1, values)
         self.assertEqual(code, 'p')
+        # Confirm conflict with changed entry having same dt-k
         values[0] = 404
         code = yield self.t.setEntry(dt1, 1, values)
         self.assertEqual(code, 'c')
-
+        # But still no problem with original entry
+        values[0] = 200
+        code = yield self.t.setEntry(dt1, 1, values)
+        self.assertEqual(code, 'p')
+        
     @defer.inlineCallbacks
     def test_setRecord(self):
         firstRecord = RECORDS[dt1][0]

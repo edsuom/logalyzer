@@ -122,6 +122,7 @@ class Transactor(AccessBroker, util.Base):
             SA.Column('dt', SA.DateTime),
             SA.Column('records', SA.Integer),
         )
+        self.pendingID = {}
 
     @transact
     def preload(self):
@@ -144,10 +145,12 @@ class Transactor(AccessBroker, util.Base):
             rows = rp.fetchmany()
         return ipm
 
-    def getEntry(self, dt, k):
+    def _getEntry(self, dt, k):
         """
         Returns all of the columns after dt, k for one unique dt-k
         combination in the entries table.
+
+        Only called from within transact-decorated methods.
         """
         col = self.entries.c
         if not self.s('s_entry'):
@@ -182,7 +185,7 @@ class Transactor(AccessBroker, util.Base):
         # Check the lookup tree first
         if self.dtk.check(dt, k):
             # There appears to be a dt-k entry already...
-            row = self.getEntry(dt, k)
+            row = self._getEntry(dt, k)
             if row:
                 # ... yes, indeed; check it
                 return checkExisting(row)
@@ -216,7 +219,44 @@ class Transactor(AccessBroker, util.Base):
             c = self.entries.c
             self.s([SA.func.max(c.k)], c.dt == SA.bindparam('dt'))
         return self.s().execute(dt=dt).first()[0]
-    
+
+    def _getID(self, record, name):
+        """
+        Returns a deferred to the unique ID for the named value in the
+        supplied record dict, looked up from the appropriate
+        indexed-value table if it's not in my cache for that name.
+        
+        Runs asynchronously; don't call from a transact method.
+        """
+        def done(ID):
+            del dDict[value]
+            valueDict[value] = ID
+            return ID
+        
+        valueDict = self.cachedValues[name]
+        # Truncate any overly long values now, before they cause any
+        # complications in the DB check or insertion
+        value = record[name][:self.valueLength]
+        if self.cm.check(name, value) and value in valueDict:
+            # Cached ID
+            return defer.succeed(valueDict[value])
+        # Get ID from DB for value, at high priority
+        dDict = self.pendingID.setdefault(name, {})
+        if value in dDict:
+            d = defer.Deferred()
+            dDict[value].chainDeferred(d)
+        else:
+            discardedValue = self.cm.set(name, value)
+            if discardedValue in valueDict:
+                del valueDict[discardedValue]
+            # This is its own transaction, a high-priority one
+            d = self.setNameValue(name, value, niceness=-15)
+            dDict[value] = d
+            d.addCallback(done)
+        d.addErrback(
+            self.oops, "Getting ID for '{}' value '{}'", name, value)
+        return d
+
     @defer.inlineCallbacks
     def setRecord(self, dt, k, record):
         """
@@ -235,23 +275,13 @@ class Transactor(AccessBroker, util.Base):
         """
         if not hasattr(self, 'cm'):
             self.cacheSetup()
+        # Build list of values and indexed-value IDs
         values = [record[x] for x in ('http', 'was_rd', 'ip')]
-        for name in self.indexedValues:
-            valueDict = self.cachedValues[name]
-            # Truncate any overly long values now, before they cause any
-            # complications in the DB check or insertion
-            value = record[name][:self.valueLength]
-            if self.cm.check(name, value) and value in valueDict:
-                # Cached ID
-                ID = valueDict[value]
-            else:
-                # Get ID from DB for value, at high priority
-                ID = yield self.setNameValue(name, value, niceness=-15)
-                discardedValue = self.cm.set(name, value)
-                if discardedValue in valueDict:
-                    del valueDict[discardedValue]
-                valueDict[value] = ID
-            values.append(ID)
+        dList = [self._getID(record, name) for name in self.indexedValues]
+        IDs = yield defer.gatherResults(dList)
+        values.extend(IDs)
+        # Set the entry in its own transaction (which includes
+        # checking for existing ID/value entries)
         code = yield self.setEntry(dt, k, values)
         if code == 'p':
             # Entry was already present
@@ -277,7 +307,7 @@ class Transactor(AccessBroker, util.Base):
         datetime-sequence combination dt-k.
         """
         result = {}
-        row = list(self.getEntry(dt, k))
+        row = list(self._getEntry(dt, k))
         for j, name in enumerate(self.directValues):
             result[name] = row[j]
         for j, name in enumerate(self.indexedValues):
@@ -314,7 +344,9 @@ class Transactor(AccessBroker, util.Base):
         With just fileName, returns a row object if there is an entry for
         the file. With two additional arguments of a datetime object
         and an integer number of records, updates or inserts an entry
-        for the file. Call from a transact method.
+        for the file.
+
+        Call from a transact method.
         """
         cols = self.files.c
         if args:
