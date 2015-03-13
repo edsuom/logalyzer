@@ -72,6 +72,7 @@ class Transactor(AccessBroker, util.Base):
     entries.
 
     """
+    valueLength = 255
     directValues = ['http', 'was_rd', 'ip']
     indexedValues = ['vhost', 'url', 'ref', 'ua']
     colNames = directValues +\
@@ -112,8 +113,15 @@ class Transactor(AccessBroker, util.Base):
             yield self.table(
                 name,
                 SA.Column('id', SA.Integer, primary_key=True),
-                SA.Column('value', SA.String(255)),
+                SA.Column('value', SA.String(self.valueLength)),
             )
+        yield self.table(
+            'files',
+            SA.Column(
+                'name', SA.String(self.valueLength), primary_key=True),
+            SA.Column('dt', SA.DateTime),
+            SA.Column('records', SA.Integer),
+        )
 
     @transact
     def preload(self):
@@ -230,7 +238,9 @@ class Transactor(AccessBroker, util.Base):
         values = [record[x] for x in ('http', 'was_rd', 'ip')]
         for name in self.indexedValues:
             valueDict = self.cachedValues[name]
-            value = record[name]
+            # Truncate any overly long values now, before they cause any
+            # complications in the DB check or insertion
+            value = record[name][:self.valueLength]
             if self.cm.check(name, value) and value in valueDict:
                 # Cached ID
                 ID = valueDict[value]
@@ -288,14 +298,6 @@ class Transactor(AccessBroker, util.Base):
         rp = self.execute(
             self.entries.delete().where(self.entries.c.ip == ip))
         return rp.rowcount
-    
-    @transact
-    def hits(self, year, month, vhost):
-        """
-        Returns the number of visitors (unique IP addresses) during the
-        specified year and month for a particular vhost.
-        """
-        # TODO
 
     @transact
     def hitsForIP(self, ip):
@@ -307,6 +309,56 @@ class Transactor(AccessBroker, util.Base):
             sh.where(cols.ip == ip)
         return sh().first()[0]
 
+    def _fileInfo(self, fileName, *args):
+        """
+        With just fileName, returns a row object if there is an entry for
+        the file. With two additional arguments of a datetime object
+        and an integer number of records, updates or inserts an entry
+        for the file. Call from a transact method.
+        """
+        cols = self.files.c
+        if args:
+            if self._fileInfo(fileName):
+                self.files.update(
+                    cols.name == fileName).execute(
+                        dt=args[0], records=args[1])
+            else:
+                self.files.insert().execute(
+                    name=fileName, dt=args[0], records=args[1])
+            return
+        if not self.s("file_info"):
+            self.s(
+                [cols.dt, cols.records],
+                cols.name == SA.bindparam('name'))
+        return self.s().execute(name=fileName).first()
+    
+    @transact
+    def getFileInfo(self, fileName):
+        """
+        Returns the datetime and number of records for the file, if one
+        was processed previously and its results fully reflected in
+        the DB, or C{None}
+        """
+        return self._fileInfo(fileName)
+
+    @transact
+    def setFileInfo(self, fileName, dt, records):
+        """
+        Sets the datetime and number of records for the file to indicate
+        that it has been processed and its results are fully reflected
+        in the DB.
+        """
+        self._fileInfo(fileName, dt, records)
+
+    @transact
+    def deleteFileInfo(self, fileName):
+        """
+        Probably don't need this except for testing
+        """
+        self.files.delete(self.files.c.name == fileName).delete()
+    
+        
+        
 
                 
                 

@@ -7,7 +7,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 """
 
-import re, gzip
+import os, re, gzip
 from copy import copy
 from datetime import datetime
 
@@ -286,7 +286,9 @@ class Reader(Base):
         self.fileNames = logFiles
         from records import MasterRecordKeeper
         self.rk = MasterRecordKeeper(dbURL, warnings=warnings, gui=gui)
-        self.w = writer
+        self.t = self.rk.trans
+        # TODO
+        self.w = None #writer
         self.cores = cores
         self.info = info
         self.verbose = verbose
@@ -330,14 +332,18 @@ class Reader(Base):
         returning a reference to a list of all IP addresses purged
         during the run.
         """
-        @defer.inlineCallbacks
-        def gotSomeResults(results, fileName):
-            if results:
-                ipList, records = results
+        def gotSomeResults(result, fileName, dtFile):
+            if result:
+                ipList, records = result
+                N_records = self.rk.len(records)
                 self.fileStatus(
                     fileName, "{:d} purges, {:d} records",
-                    len(ipList), self.rk.len(records))
-                dq.put((results, fileName))
+                    len(ipList), N_records)
+                dq.put((result, fileName))
+                # Put the low-priority DB and (possibly) file writes
+                # in the write-deferred list
+                dWriteList.append(self.t.setFileInfo(
+                    fileName, dtFile, N_records, niceness=15))
                 if self.w:
                     dWriteList.append(self.w.write(records))
             else:
@@ -345,21 +351,36 @@ class Reader(Base):
                 self.msgWarning(
                     "Timeout of parser for '{}', retrying", fileName)
                 self.fileStatus(fileName, "Retrying...")
-                yield dispatch(fileName)
-        
+                return dispatch(fileName)
+
         def dispatch(fileName):
-            self.fileStatus(fileName, "Parsing...")
-            d = self.pq.call(
-                'parser', self.pathInDir(fileName), timeout=self.timeout)
-            d.addCallback(gotSomeResults, fileName)
-            d.addErrback(self.oops, "Parsing of '{}'", fileName)
-            return d
+            def gotInfo(result):
+                if result and result[0] == dtFile:
+                    self.fileStatus(fileName, "{:d} records", result[1])
+                    dq.put((None, fileName))
+                else:
+                    self.fileStatus(fileName, "Parsing...")
+                    d = self.pq.call(
+                        'parser', filePath, timeout=self.timeout)
+                    d.addCallback(gotSomeResults, fileName, dtFile)
+                    d.addErrback(self.oops, "Parsing of '{}'", fileName)
+                    return d
+            
+            filePath = self.pathInDir(fileName)
+            dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
+            return gotInfo(None)
+            return self.t.getFileInfo(
+                fileName).addCallbacks(gotInfo, self.oops)
 
         @defer.inlineCallbacks
         def resultsLoop(*args):
             while filesLeft:
-                results, fileName = yield dq.get()
-                ipList, records = results
+                result, fileName = yield dq.get()
+                filesLeft.remove(fileName)
+                if result is None:
+                    # Non-parsed file, reflected already in DB
+                    continue
+                ipList, records = result
                 self.fileStatus(fileName, "Purging & adding...")
                 dList = []
                 for ip in ipList:
@@ -385,7 +406,6 @@ class Reader(Base):
                 # Only now, after the records have all been added, do
                 # we wait for the low-priority IP purging
                 yield defer.DeferredList(dList)
-                filesLeft.remove(fileName)
             # Wait for any file writes and closes, too
             yield defer.DeferredList(dWriteList)
             if self.w:

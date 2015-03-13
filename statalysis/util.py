@@ -249,11 +249,10 @@ class Base(object):
     def fileStatus(self, fileName, *args):
         if self.gui:
             self.gui.fileStatus(fileName, *args)
-        elif self.verbose:
-            proto = "File {}: " + args[0]
-            args = [fileName] + list(args[1:])
-            print proto.format(*args)
-
+        elif self.verbose and args:
+            proto = "FILE {}: {}".format(fileName, args[0])
+            print proto.format(*args[1:])
+    
     def fileProgress(self, fileName):
         if self.gui:
             self.gui.fileStatus(fileName)
