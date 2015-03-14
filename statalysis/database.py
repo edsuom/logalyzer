@@ -180,17 +180,21 @@ class Transactor(AccessBroker, util.Base):
         You must ensure that the dt-k combination is not already in
         the DB and that there is one value for each name defined in
         I{colNames}.
+
+        Returns C{True} if the entry was inserted, C{False} if not.
+
         """
         print "!IE", dt, k
         print values
         kw = {'dt': dt, 'k': k}
-        if len(self.colNames) > len(values):
-            
-            return
+        N = [len(x) for x in (self.colNames, values)]
+        if N[0] > N[1]:
+            self.msgWarning("Need {:d} values entries, only got {:d}", *N)
+            return False
         for kk, name in enumerate(self.colNames):
             kw[name] = values[kk]
-        self.entries.insert().execute(**kw)
-
+        rp = self.entries.insert().execute(**kw)
+        return rp.is_insert
     
     @defer.inlineCallbacks
     def setEntry(self, dt, k, values):
@@ -206,12 +210,14 @@ class Transactor(AccessBroker, util.Base):
         c: Conflict: Matching dt-k entry found, but with differing
            values, you need to add another one with a different k.
         a: Added: No matching dt-k entry found, so one was added.
+        f: Failed to insert for some reason.
+
         """
         def checkExisting(rowValues):
             for kk, value in enumerate(rowValues):
                 if value != values[kk]:
                     print "C", dt, k
-                    print kk, values[kk], values, rowValues
+                    print kk, values[kk], rowValues
                     return 'c'
             print "P", dt, k
             print rowValues
@@ -235,12 +241,14 @@ class Transactor(AccessBroker, util.Base):
         if pleaseInsert:
             print "!DTK Inserting"
             # Insert new entry
-            yield self.insertEntry(dt, k, values)
-            self.dtk.set(dt, k)
-            # NOTE: When it hung, it didn't make it to this point!!!
-            print "A", dt, k
-            print values
-            code = 'a'
+            wasInserted = yield self.insertEntry(dt, k, values)
+            if wasInserted:
+                self.dtk.set(dt, k)
+                print "A", dt, k
+                code = 'a'
+            else:
+                print "F", dt, k
+                code = 'f'
         defer.returnValue(code)
     
     @transact
@@ -316,20 +324,27 @@ class Transactor(AccessBroker, util.Base):
         return d
 
     @defer.inlineCallbacks
-    def setRecord(self, dt, k, record):
+    def setRecord(self, dt, k, record, isRetry=False):
         """
         Adds all needed database entries for the supplied record at
         the specified datetime-sequence combination dt-k.
 
-        Returns a deferred that fires with C{None} if a new database
-        entry was written, a new value of k if there was a conflict
-        with an existing dt-k combination and the new value had to be
-        obtained, or with the old k value if there was the same exact
-        entry (no conflict).
+        Returns a deferred that fires with
+
+        - C{None} if a new database entry was written,
+
+        - a new value of k if there was a conflict with an existing
+          dt-k combination and the new value had to be obtained
+
+        - the old k value if there was the same exact entry (no
+          conflict), or
+
+        - C{False} if the DB operation failed even after a retry.
 
         A conflict exists when there is already an entry for the
         specified dt-k combination that matches values than the ones
         in your supplied record.
+
         """
         if not hasattr(self, 'cm'):
             self.cacheSetup()
@@ -346,10 +361,12 @@ class Transactor(AccessBroker, util.Base):
         print record
         print values
         # TODO: Occasionally hangs at this next line!!!
+        success = False
         code = yield self.setEntry(dt, k, values)
         if code == 'p':
             # Entry was already present
             result = k
+            success = True
         if code == 'c':
             # Conflict with existing dt-k combination having different
             # values; need to get a new sequence number for this entry
@@ -364,6 +381,19 @@ class Transactor(AccessBroker, util.Base):
         elif code == 'a':
             # New entry was added
             result = None
+            success = True
+        if not success:
+            # Must have failed...
+            if isRetry:
+                # ...and this is a retry, so give up
+                result = False
+                self.msgError(
+                    "Failed to set record for <{}> - {:d}:\n{}",
+                    dt, k, record)
+            else:
+                # ...retry once
+                self.msgWarning("Retrying...")
+                result = yield self.setRecord(dt, k, record, isRetry=True)
         defer.returnValue(result)
 
     @transact
