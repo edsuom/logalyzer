@@ -116,11 +116,9 @@ class TestTransactor(TestCase):
             for name in self.t.indexedValues:
                 for k, value in enumerate(someValues):
                     # First time set...
-                    print "A"
                     ID = yield self.t.setNameValue(name, value)
                     self.assertEqual(ID, k+1)
                     # ...is same as second time
-                    print "B"
                     ID = yield self.t.setNameValue(name, value)
                     self.assertEqual(ID, k+1)
         

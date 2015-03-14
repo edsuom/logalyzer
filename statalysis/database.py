@@ -169,9 +169,7 @@ class Transactor(AccessBroker, util.Base):
                 cList,
                 SA.and_(col.dt == SA.bindparam('dt'),
                         col.k == SA.bindparam('k')))
-        print "GE-1"
         row = self.s().execute(dt=dt, k=k).first()
-        print "GE-2"
         return row
 
     @transact
@@ -187,8 +185,6 @@ class Transactor(AccessBroker, util.Base):
         Returns C{True} if the entry was inserted, C{False} if not.
 
         """
-        print "!IE", dt, k
-        print values
         kw = {'dt': dt, 'k': k}
         N = [len(x) for x in (self.colNames, values)]
         if N[0] > N[1]:
@@ -219,24 +215,15 @@ class Transactor(AccessBroker, util.Base):
         def checkExisting(rowValues):
             for kk, value in enumerate(rowValues):
                 if value != values[kk]:
-                    print "C", dt, k
-                    print kk, values[kk], rowValues
                     return 'c'
-            print "P", dt, k
-            print rowValues
             return 'p'
 
         # Check the lookup tree first
-        print "!SE", dt, k
-        print values
         pleaseInsert = True
         wasInDTK = self.dtk.check(dt, k)
         if wasInDTK:
             # There appears to be a dt-k entry already...
-            print "DTK-YES"
             row = yield self.getEntry(dt, k)
-            print "GOT ENTRY"
-            print row
             if row:
                 # ... yes, indeed; we won't be inserting anything for
                 # this dt-k combination
@@ -246,16 +233,13 @@ class Transactor(AccessBroker, util.Base):
                 code = yield checkExisting(row)
             # ... no, we must have purged it. No biggie.
         if pleaseInsert:
-            print "!DTK Inserting"
             # Insert new entry
             wasInserted = yield self.insertEntry(dt, k, values)
             if wasInserted:
-                print "A", dt, k
                 code = 'a'
                 if not wasInDTK:
                     self.dtk.set(dt, k)
             else:
-                print "F", dt, k
                 code = 'f'
         defer.returnValue(code)
     
@@ -265,18 +249,15 @@ class Transactor(AccessBroker, util.Base):
         Get the unique ID for this value in the named table, adding a new
         entry for it there if necessary.
         """
-        print "!SNV", name, value
         table = getattr(self, name)
         if not self.s("s_{}".format(name)):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
         row = self.s().execute(value=value).first()
         if row:
             ID = row[0]
-            print "SNV-A", ID
         else:
             rp = table.insert().execute(value=value)
             ID = rp.lastrowid
-            print "SNV-B", ID
         return ID
 
     @transact
@@ -296,7 +277,6 @@ class Transactor(AccessBroker, util.Base):
         """
         def done(ID):
             # Order of the following two lines could be important
-            print "GI", name, value, ID
             valueDict[value] = ID
             self._pendingID(name, value, clear=True)
             return ID
@@ -309,12 +289,10 @@ class Transactor(AccessBroker, util.Base):
         #if self.cm.check(name, value) and value in valueDict:
         if value in valueDict:
             # Cached ID
-            print "A", name, value
             return defer.succeed(valueDict[value])
         # Get ID from DB for value, at high priority
         dID = self._pendingID(name, value)
         if dID is None:
-            print "B", name, value
             #discardedValue = self.cm.set(name, value)
             #if discardedValue in valueDict:
             #    del valueDict[discardedValue]
@@ -324,7 +302,6 @@ class Transactor(AccessBroker, util.Base):
             self._pendingID(name, value, d)
             d.addCallback(done)
         else:
-            print "C", name, value
             d = defer.Deferred()
             d.addCallback(lambda _ : valueDict[value])
             dID.chainDeferred(d)
@@ -366,9 +343,6 @@ class Transactor(AccessBroker, util.Base):
         values.extend(IDs)
         # Set the entry in its own transaction (which includes
         # checking for existing ID/value entries)
-        print "\n!SR", dt, k
-        print record
-        print values
         # TODO: Occasionally hangs at this next line!!!
         success = False
         code = yield self.setEntry(dt, k, values)
