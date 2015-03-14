@@ -169,7 +169,10 @@ class Transactor(AccessBroker, util.Base):
                 cList,
                 SA.and_(col.dt == SA.bindparam('dt'),
                         col.k == SA.bindparam('k')))
-        return self.s().execute(dt=dt, k=k).first()
+        print "GE-1"
+        row = self.s().execute(dt=dt, k=k).first()
+        print "GE-2"
+        return row
 
     @transact
     def insertEntry(self, dt, k, values):
@@ -227,25 +230,30 @@ class Transactor(AccessBroker, util.Base):
         print "!SE", dt, k
         print values
         pleaseInsert = True
-        if self.dtk.check(dt, k):
+        wasInDTK = self.dtk.check(dt, k)
+        if wasInDTK:
             # There appears to be a dt-k entry already...
             print "DTK-YES"
             row = yield self.getEntry(dt, k)
             print "GOT ENTRY"
             print row
             if row:
-                # ... yes, indeed; check it
-                code = yield checkExisting(row)
+                # ... yes, indeed; we won't be inserting anything for
+                # this dt-k combination
                 pleaseInsert = False
+                # But let's check the existing row and return a 'c' if
+                # there's a conflict, or a 'p' if not.
+                code = yield checkExisting(row)
             # ... no, we must have purged it. No biggie.
         if pleaseInsert:
             print "!DTK Inserting"
             # Insert new entry
             wasInserted = yield self.insertEntry(dt, k, values)
             if wasInserted:
-                self.dtk.set(dt, k)
                 print "A", dt, k
                 code = 'a'
+                if not wasInDTK:
+                    self.dtk.set(dt, k)
             else:
                 print "F", dt, k
                 code = 'f'
@@ -257,17 +265,18 @@ class Transactor(AccessBroker, util.Base):
         Get the unique ID for this value in the named table, adding a new
         entry for it there if necessary.
         """
+        print "!SNV", name, value
         table = getattr(self, name)
         if not self.s("s_{}".format(name)):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
         row = self.s().execute(value=value).first()
         if row:
             ID = row[0]
-            print "SNV-A", name, value, ID
+            print "SNV-A", ID
         else:
             rp = table.insert().execute(value=value)
             ID = rp.lastrowid
-            print "SNV-B", name, value, ID
+            print "SNV-B", ID
         return ID
 
     @transact

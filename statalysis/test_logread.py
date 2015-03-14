@@ -148,7 +148,7 @@ class TestReader(tb.TestCase):
         self.t = self.r.rk.trans
 
     def test_complains(self):
-        self.assertRaises(OSError, logread.Reader, 'bogusdir')
+        self.assertRaises(OSError, logread.Reader, 'bogusdir', "sqlite://")
 
     def test_run(self):
         @defer.inlineCallbacks
@@ -159,7 +159,8 @@ class TestReader(tb.TestCase):
                 ipList = result
                 self.assertIsInstance(ipList, list)
                 self.assertTrue(len(ipList) > 1)
-                Ne = 2; N = yield self.t.hitsForIP("98.190.155.57")
+                Ne = 2
+                N = yield self.t.hitsForIP("98.190.155.57")
                 # Why do I get N=0?
                 msg = "Expected at least {:d} records, got {:d}".format(Ne, N)
                 self.assertGreater(N, Ne, msg)
