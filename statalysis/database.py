@@ -211,6 +211,7 @@ class Transactor(AccessBroker, util.Base):
             kw[name] = values[kk]
         self.entries.insert().execute(**kw)
         self.dtk.set(dt, k)
+        # NOTE: When it hung, it didn't make it to this point!!!
         print "!A", dt, k
         print values
         return 'a'
@@ -317,6 +318,7 @@ class Transactor(AccessBroker, util.Base):
         print "\n!SR", dt, k
         print record
         print values
+        # TODO: Occasionally hangs at this next line!!!
         code = yield self.setEntry(dt, k, values)
         if code == 'p':
             # Entry was already present
