@@ -156,12 +156,11 @@ class Transactor(AccessBroker, util.Base):
             rows = rp.fetchmany()
         return ipm
 
-    def _getEntry(self, dt, k):
+    @transact
+    def getEntry(self, dt, k):
         """
         Returns all of the columns after dt, k for one unique dt-k
         combination in the entries table.
-
-        Only called from within transact-decorated methods.
         """
         col = self.entries.c
         if not self.s('s_entry'):
@@ -173,6 +172,27 @@ class Transactor(AccessBroker, util.Base):
         return self.s().execute(dt=dt, k=k).first()
 
     @transact
+    def insertEntry(self, dt, k, values):
+        """
+        Inserts a DB entry for the specified dt-k combination, using the
+        supplied dict values.
+
+        You must ensure that the dt-k combination is not already in
+        the DB and that there is one value for each name defined in
+        I{colNames}.
+        """
+        print "!IE", dt, k
+        print values
+        kw = {'dt': dt, 'k': k}
+        if len(self.colNames) > len(values):
+            
+            return
+        for kk, name in enumerate(self.colNames):
+            kw[name] = values[kk]
+        self.entries.insert().execute(**kw)
+
+    
+    @defer.inlineCallbacks
     def setEntry(self, dt, k, values):
         """
         Adds a new entry to the database for the specified
@@ -190,32 +210,39 @@ class Transactor(AccessBroker, util.Base):
         def checkExisting(rowValues):
             for kk, value in enumerate(rowValues):
                 if value != values[kk]:
-                    print "!C", dt, k
+                    print "C", dt, k
                     print kk, values[kk], values, rowValues
                     return 'c'
-            print "!P", dt, k
+            print "P", dt, k
             print rowValues
             return 'p'
 
         # Check the lookup tree first
+        print "!SE", dt, k
+        print values
+        pleaseInsert = True
         if self.dtk.check(dt, k):
             # There appears to be a dt-k entry already...
-            row = self._getEntry(dt, k)
+            print "DTK-YES"
+            row = yield self.getEntry(dt, k)
+            print "GOT ENTRY"
+            print row
             if row:
                 # ... yes, indeed; check it
-                return checkExisting(row)
+                code = yield checkExisting(row)
+                pleaseInsert = False
             # ... no, we must have purged it. No biggie.
-        # Insert new entry
-        kw = {'dt': dt, 'k': k}
-        for kk, name in enumerate(self.colNames):
-            kw[name] = values[kk]
-        self.entries.insert().execute(**kw)
-        self.dtk.set(dt, k)
-        # NOTE: When it hung, it didn't make it to this point!!!
-        print "!A", dt, k
-        print values
-        return 'a'
-
+        if pleaseInsert:
+            print "!DTK Inserting"
+            # Insert new entry
+            yield self.insertEntry(dt, k, values)
+            self.dtk.set(dt, k)
+            # NOTE: When it hung, it didn't make it to this point!!!
+            print "A", dt, k
+            print values
+            code = 'a'
+        defer.returnValue(code)
+    
     @transact
     def setNameValue(self, name, value):
         """
@@ -330,30 +357,44 @@ class Transactor(AccessBroker, util.Base):
             k = maxSequence + 1
             code = yield self.setEntry(dt, k, values)
             if code == 'c':
-                raise Exception("Couldn't add with new sequence number!")
+                self.msgWarning(
+                    "Couldn't add record for {} even with new " +\
+                    "sequence number {:d}", dt, k)
             result = k
         elif code == 'a':
             # New entry was added
             result = None
         defer.returnValue(result)
-    
+
     @transact
+    def getValuesFromIDs(self, IDs):
+        """
+        Call with a list of IDs, one for each of my I{indexedValues}, and
+        returns a dict with the name:value items.
+        """
+        result = {}
+        for k, ID in enumerate(IDs):
+            name = self.indexedValues[k]
+            cols = getattr(getattr(self, name), 'c')
+            for sh in self.selectorator(cols.value):
+                sh.where(cols.id == ID)
+            result[name] = sh().first()[0]
+        return result
+        
+    @defer.inlineCallbacks
     def getRecord(self, dt, k):
         """
         Returns a (deferred) dict containing the record for the specified
         datetime-sequence combination dt-k.
         """
         result = {}
-        row = list(self._getEntry(dt, k))
+        row = yield self.getEntry(dt, k)
+        row = list(row)
         for j, name in enumerate(self.directValues):
             result[name] = row[j]
-        for j, name in enumerate(self.indexedValues):
-            ID = row[j+3]
-            cols = getattr(getattr(self, name), 'c')
-            for sh in self.selectorator(cols.value):
-                sh.where(cols.id == ID)
-            result[name] = sh().first()[0]
-        return result
+        valueDict = yield self.getValuesFromIDs(row[3:])
+        result.update(valueDict)
+        defer.returnValue(result)
 
     @transact
     def purgeIP(self, ip):
@@ -376,18 +417,23 @@ class Transactor(AccessBroker, util.Base):
             sh.where(cols.ip == ip)
         return sh().first()[0]
 
-    def _fileInfo(self, fileName, *args):
+    @transact
+    def fileInfo(self, fileName, *args):
         """
-        With just fileName, returns a row object if there is an entry for
-        the file. With two additional arguments of a datetime object
-        and an integer number of records, updates or inserts an entry
-        for the file.
+        With just fileName, returns the datetime and number of records for
+        the file, if one was processed previously and its results
+        fully reflected in the DB, or C{None}
 
-        Call from a transact method.
+        With two additional arguments of a datetime object and an
+        integer number of records, updates or inserts an entry for the
+        file to indicate that it has been processed and its results
+        are fully reflected in the DB.
         """
         cols = self.files.c
         if args:
-            if self._fileInfo(fileName):
+            # The transact decorator is smart enough to avoid multiple
+            # wrapping with a recursive call.
+            if self.fileInfo(fileName):
                 self.files.update(
                     cols.name == fileName).execute(
                         dt=args[0], records=args[1])
@@ -400,24 +446,6 @@ class Transactor(AccessBroker, util.Base):
                 [cols.dt, cols.records],
                 cols.name == SA.bindparam('name'))
         return self.s().execute(name=fileName).first()
-    
-    @transact
-    def getFileInfo(self, fileName):
-        """
-        Returns the datetime and number of records for the file, if one
-        was processed previously and its results fully reflected in
-        the DB, or C{None}
-        """
-        return self._fileInfo(fileName)
-
-    @transact
-    def setFileInfo(self, fileName, dt, records):
-        """
-        Sets the datetime and number of records for the file to indicate
-        that it has been processed and its results are fully reflected
-        in the DB.
-        """
-        self._fileInfo(fileName, dt, records)
 
     @transact
     def deleteFileInfo(self, fileName):

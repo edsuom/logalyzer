@@ -213,19 +213,19 @@ class TestTransactor(TestCase):
         file1 = "access.log"
         file2 = "another/access.log"
         # Nothing at first
-        x = yield self.t.getFileInfo(file1)
+        x = yield self.t.fileInfo(file1)
         self.assertEqual(x, None)
         # Set and get
-        yield self.t.setFileInfo(file1, dt1, 1234)
-        x = yield self.t.getFileInfo(file1)
+        yield self.t.fileInfo(file1, dt1, 1234)
+        x = yield self.t.fileInfo(file1)
         self.assertEqual(x, (dt1, 1234))
         # Set differently and get
-        yield self.t.setFileInfo(file1, dt1, 5678)
-        x = yield self.t.getFileInfo(file1)
+        yield self.t.fileInfo(file1, dt1, 5678)
+        x = yield self.t.fileInfo(file1)
         self.assertEqual(x, (dt1, 5678))
         # Set and get a different file
-        yield self.t.setFileInfo(file2, dt2, 5678)
-        x = yield self.t.getFileInfo(file2)
+        yield self.t.fileInfo(file2, dt2, 5678)
+        x = yield self.t.fileInfo(file2)
         self.assertEqual(x, (dt2, 5678))
         
         

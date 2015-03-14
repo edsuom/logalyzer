@@ -39,18 +39,13 @@ class TestParserRecordKeeper(TestCase):
 
 class TestMasterRecordKeeper(TestCase):
     def setUp(self):
-        self.dbPath = "records.db"
         self.rk = records.MasterRecordKeeper(
-            "sqlite:///{}".format(self.dbPath),
-            warnings=True,
-        )
+            "sqlite://", warnings=True)
         self.t = self.rk.trans
         return self.rk.startup()
     
     @defer.inlineCallbacks
     def tearDown(self):
-        for ip in (ip1, ip2):
-            yield self.t.purgeIP(ip)
         yield self.rk.shutdown()
         
     @defer.inlineCallbacks

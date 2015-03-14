@@ -372,7 +372,7 @@ class Reader(Base):
             self.msgBody("File datetime: {}", dtFile, ID=ID)
             # TODO: WHY is the bottom line not working????
             return gotInfo(None)
-            #return self.t.getFileInfo(
+            #return self.t.fileInfo(
             #    fileName).addCallbacks(gotInfo, self.oops)
 
         @defer.inlineCallbacks
@@ -408,7 +408,7 @@ class Reader(Base):
                     "Added {:d} of {:d} records", N_added, N_total)
                 # Write the files entry into the DB only now that its
                 # records have been accounted for
-                dList.append(self.t.setFileInfo(
+                dList.append(self.t.fileInfo(
                     fileName, dtFile, N_total, niceness=15))
                 # Only now, after the records have all been added, do
                 # we wait for the low-priority IP purging and DB write
