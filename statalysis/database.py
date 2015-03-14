@@ -305,6 +305,7 @@ class Transactor(AccessBroker, util.Base):
         # Set the entry in its own transaction (which includes
         # checking for existing ID/value entries)
         print "!SE", dt, k
+        print record
         print values
         code = yield self.setEntry(dt, k, values)
         if code == 'p':
