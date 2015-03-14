@@ -7,7 +7,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 """
 
-import os.path
+import os.path, random
 
 from twisted.internet import defer
 from twisted.python import failure
@@ -64,12 +64,12 @@ class TestDTK(TestCase):
 class TestTransactor(TestCase):
     def setUp(self):
         # In-memory database
-        self.t = database.Transactor("sqlite://", echo=True)
+        self.t = database.Transactor("sqlite://")#, echo=True)
         return self.t.preload()
     
     def tearDown(self):
         return self.t.shutdown()
-    
+
     @defer.inlineCallbacks
     def test_setEntry(self):
         values = makeEntry(200, False, ip1)
@@ -90,6 +90,52 @@ class TestTransactor(TestCase):
         values[0] = 200
         code = yield self.t.setEntry(dt1, 1, values)
         self.assertEqual(code, 'p')
+
+    def test_pendingID(self):
+        pe = self.t._pendingID
+        names = ('alpha', 'bravo', 'charlie')
+        values = ('delta', 'foxtrot', 'golf')
+        for j, name in enumerate(names):
+            for k, value in enumerate(values):
+                d = defer.Deferred()
+                self.assertEqual(pe(name, value), None)
+                pe(name, value, d)
+                self.assertEqual(pe(name, value), d)
+                if j > 0:
+                    self.assertNotEqual(pe(names[j-1], value), d)
+                if k > 0:
+                    self.assertNotEqual(pe(name, values[k-1]), d)
+                pe(name, value, clear=True)
+                self.assertEqual(pe(name, value), None)
+    
+    @defer.inlineCallbacks
+    def test_getID(self):
+        def nowRun(null, name, value):
+            d = self.t._getID(name, value)
+            d.addCallback(gotID, value)
+            return d
+
+        def gotID(ID, value):
+            IDLists[value].append(ID)
+
+        N = 4
+        self.t.cacheSetup()
+        someValues = ("foo", "bar-whatever", "/wasting-time forever")
+        for name in self.t.indexedValues:
+            dList = []
+            IDLists = {}
+            for value in someValues:
+                IDLists[value] = []
+                for k in xrange(N):
+                    randomDelay = random.randrange(0, 2)
+                    d = self.t.deferToDelay(randomDelay)
+                    d.addCallback(nowRun, name, value)
+                    dList.append(d)
+            yield defer.DeferredList(dList)
+            for value in someValues:
+                IDList = IDLists[value]
+                self.assertEqual(len(IDList), N)
+                self.assertEqual(min(IDList), max(IDList))
         
     @defer.inlineCallbacks
     def test_setRecord(self):

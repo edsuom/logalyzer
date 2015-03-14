@@ -88,6 +88,17 @@ class Transactor(AccessBroker, util.Base):
         for name in self.indexedValues:
             self.cm.new(name)
             self.cachedValues[name] = {}
+
+    def _pendingID(self, name, value, d=None, clear=False):
+        if not hasattr(self, '_pendingIDs'):
+            self._pendingIDs = {}
+        if name not in self._pendingIDs:
+            self._pendingIDs[name] = {}
+        if clear:
+            self._pendingIDs[name].pop(value, None)
+        elif d is None:
+            return self._pendingIDs[name].get(value, None)
+        self._pendingIDs[name][value] = d
     
     @defer.inlineCallbacks
     def startup(self):
@@ -177,9 +188,13 @@ class Transactor(AccessBroker, util.Base):
         a: Added: No matching dt-k entry found, so one was added.
         """
         def checkExisting(rowValues):
-            for k, value in enumerate(rowValues):
-                if value != values[k]:
+            for kk, value in enumerate(rowValues):
+                if value != values[kk]:
+                    print "!C", dt, k
+                    print kk, values[kk], values, rowValues
                     return 'c'
+            print "!P", dt, k
+            print rowValues
             return 'p'
 
         # Check the lookup tree first
@@ -192,10 +207,12 @@ class Transactor(AccessBroker, util.Base):
             # ... no, we must have purged it. No biggie.
         # Insert new entry
         kw = {'dt': dt, 'k': k}
-        for j, name in enumerate(self.colNames):
-            kw[name] = values[j]
+        for kk, name in enumerate(self.colNames):
+            kw[name] = values[kk]
         self.entries.insert().execute(**kw)
         self.dtk.set(dt, k)
+        print "!A", dt, k
+        print values
         return 'a'
 
     @transact
@@ -220,7 +237,7 @@ class Transactor(AccessBroker, util.Base):
             self.s([SA.func.max(c.k)], c.dt == SA.bindparam('dt'))
         return self.s().execute(dt=dt).first()[0]
 
-    def _getID(self, record, name):
+    def _getID(self, name, value):
         """
         Returns a deferred to the unique ID for the named value in the
         supplied record dict, looked up from the appropriate
@@ -229,30 +246,33 @@ class Transactor(AccessBroker, util.Base):
         Runs asynchronously; don't call from a transact method.
         """
         def done(ID):
-            del dDict[value]
+            # Order of the following two lines could be important
             valueDict[value] = ID
+            self._pendingID(name, value, clear=True)
             return ID
-        
+
         valueDict = self.cachedValues[name]
         # Truncate any overly long values now, before they cause any
         # complications in the DB check or insertion
-        value = record[name][:self.valueLength]
+        value = value[:self.valueLength]
         if self.cm.check(name, value) and value in valueDict:
             # Cached ID
             return defer.succeed(valueDict[value])
         # Get ID from DB for value, at high priority
-        dDict = self.pendingID.setdefault(name, {})
-        if value in dDict:
-            d = defer.Deferred()
-            dDict[value].chainDeferred(d)
-        else:
+        dID = self._pendingID(name, value)
+        if dID is None:
+            # No pending DB fetches now
             discardedValue = self.cm.set(name, value)
             if discardedValue in valueDict:
                 del valueDict[discardedValue]
             # This is its own transaction, a high-priority one
             d = self.setNameValue(name, value, niceness=-15)
-            dDict[value] = d
+            self._pendingID(name, value, d)
             d.addCallback(done)
+        else:
+            d = defer.Deferred()
+            d.addCallback(lambda _ : valueDict[value])
+            dID.chainDeferred(d)
         d.addErrback(
             self.oops, "Getting ID for '{}' value '{}'", name, value)
         return d
@@ -277,11 +297,15 @@ class Transactor(AccessBroker, util.Base):
             self.cacheSetup()
         # Build list of values and indexed-value IDs
         values = [record[x] for x in ('http', 'was_rd', 'ip')]
-        dList = [self._getID(record, name) for name in self.indexedValues]
+        dList = [
+            self._getID(name, record[name])
+            for name in self.indexedValues]
         IDs = yield defer.gatherResults(dList)
         values.extend(IDs)
         # Set the entry in its own transaction (which includes
         # checking for existing ID/value entries)
+        print "!SE", dt, k
+        print values
         code = yield self.setEntry(dt, k, values)
         if code == 'p':
             # Entry was already present
