@@ -8,6 +8,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 """
 
 import os.path, random
+from copy import copy
 
 from twisted.internet import defer
 from twisted.python import failure
@@ -70,6 +71,23 @@ class TestTransactor(TestCase):
     def tearDown(self):
         return self.t.shutdown()
 
+    def test_pendingID(self):
+        pe = self.t._pendingID
+        names = ('alpha', 'bravo', 'charlie')
+        values = ('delta', 'foxtrot', 'golf')
+        for j, name in enumerate(names):
+            for k, value in enumerate(values):
+                d = defer.Deferred()
+                self.assertEqual(pe(name, value), None)
+                pe(name, value, d)
+                self.assertEqual(pe(name, value), d)
+                if j > 0:
+                    self.assertNotEqual(pe(names[j-1], value), d)
+                if k > 0:
+                    self.assertNotEqual(pe(name, values[k-1]), d)
+                pe(name, value, clear=True)
+                self.assertEqual(pe(name, value), None)
+    
     @defer.inlineCallbacks
     def test_setEntry(self):
         values = makeEntry(200, False, ip1)
@@ -91,23 +109,19 @@ class TestTransactor(TestCase):
         code = yield self.t.setEntry(dt1, 1, values)
         self.assertEqual(code, 'p')
 
-    def test_pendingID(self):
-        pe = self.t._pendingID
-        names = ('alpha', 'bravo', 'charlie')
-        values = ('delta', 'foxtrot', 'golf')
-        for j, name in enumerate(names):
-            for k, value in enumerate(values):
-                d = defer.Deferred()
-                self.assertEqual(pe(name, value), None)
-                pe(name, value, d)
-                self.assertEqual(pe(name, value), d)
-                if j > 0:
-                    self.assertNotEqual(pe(names[j-1], value), d)
-                if k > 0:
-                    self.assertNotEqual(pe(name, values[k-1]), d)
-                pe(name, value, clear=True)
-                self.assertEqual(pe(name, value), None)
-    
+    @defer.inlineCallbacks
+    def test_setNameValue(self):
+        someValues = ("/", "foo", "bar-whatever", "/wasting-time forever")
+        for j in xrange(3):
+            for name in self.t.indexedValues:
+                for k, value in enumerate(someValues):
+                    # First time set...
+                    ID = yield self.t.setNameValue(name, value)
+                    self.assertEqual(ID, k+1)
+                    # ...is same as second time
+                    ID = yield self.t.setNameValue(name, value)
+                    self.assertEqual(ID, k+1)
+        
     @defer.inlineCallbacks
     def test_getID(self):
         def nowRun(null, name, value):
@@ -167,7 +181,7 @@ class TestTransactor(TestCase):
     @defer.inlineCallbacks
     def test_writesConflictingRecord(self):
         yield self.writeAllRecords()
-        cRecord = RECORDS[dt1][0]
+        cRecord = copy(RECORDS[dt1][0])
         # Repeat of same record yields same sequence
         result = yield self.t.setRecord(dt1, 0, cRecord)
         self.assertEqual(result, 0)

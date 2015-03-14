@@ -226,9 +226,13 @@ class Transactor(AccessBroker, util.Base):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
         row = self.s().execute(value=value).first()
         if row:
-            return row[0]
-        rp = table.insert().execute(value=value)
-        return rp.lastrowid
+            ID = row[0]
+            print "SNV-A", name, value, ID
+        else:
+            rp = table.insert().execute(value=value)
+            ID = rp.lastrowid
+            print "SNV-B", name, value, ID
+        return ID
 
     @transact
     def getMaxSequence(self, dt):
@@ -247,6 +251,7 @@ class Transactor(AccessBroker, util.Base):
         """
         def done(ID):
             # Order of the following two lines could be important
+            print "GI", name, value, ID
             valueDict[value] = ID
             self._pendingID(name, value, clear=True)
             return ID
@@ -255,21 +260,26 @@ class Transactor(AccessBroker, util.Base):
         # Truncate any overly long values now, before they cause any
         # complications in the DB check or insertion
         value = value[:self.valueLength]
-        if self.cm.check(name, value) and value in valueDict:
+        # TODO: Restore caching (maybe) when weirdness gets sorted out
+        #if self.cm.check(name, value) and value in valueDict:
+        if value in valueDict:
             # Cached ID
+            print "A", name, value
             return defer.succeed(valueDict[value])
         # Get ID from DB for value, at high priority
         dID = self._pendingID(name, value)
         if dID is None:
-            # No pending DB fetches now
-            discardedValue = self.cm.set(name, value)
-            if discardedValue in valueDict:
-                del valueDict[discardedValue]
-            # This is its own transaction, a high-priority one
+            print "B", name, value
+            #discardedValue = self.cm.set(name, value)
+            #if discardedValue in valueDict:
+            #    del valueDict[discardedValue]
+            # No pending DB fetches now, so do one in its own 
+            # high-priority transaction
             d = self.setNameValue(name, value, niceness=-15)
             self._pendingID(name, value, d)
             d.addCallback(done)
         else:
+            print "C", name, value
             d = defer.Deferred()
             d.addCallback(lambda _ : valueDict[value])
             dID.chainDeferred(d)
@@ -296,15 +306,15 @@ class Transactor(AccessBroker, util.Base):
         if not hasattr(self, 'cm'):
             self.cacheSetup()
         # Build list of values and indexed-value IDs
+        dList = []
         values = [record[x] for x in ('http', 'was_rd', 'ip')]
-        dList = [
-            self._getID(name, record[name])
-            for name in self.indexedValues]
+        for name in self.indexedValues:
+            dList.append(self._getID(name, record[name]))
         IDs = yield defer.gatherResults(dList)
         values.extend(IDs)
         # Set the entry in its own transaction (which includes
         # checking for existing ID/value entries)
-        print "!SE", dt, k
+        print "\n!SR", dt, k
         print record
         print values
         code = yield self.setEntry(dt, k, values)
