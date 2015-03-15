@@ -294,6 +294,10 @@ class Recorder(Base):
             self.consolidate(outPath)
             return
         self.parseArgs()
+        # GUI, if -g option
+        if self.opt['g']:
+            self.gui = gui.GUI()
+            self.gui.start(self.logFiles)
         # Writer
         fileTypes = []
         if self.opt['f']:
@@ -301,11 +305,11 @@ class Recorder(Base):
         self.w = Writer(fileTypes)
         # Reader, which may call the writer
         self.reader = self.readerFactory(self.opt[0], self.w)
+        # GUI will stop reader when it shuts down
+        self.gui.stoppers.append(self.reader.done)
+        # Everything starts with my load method
         reactor.callWhenRunning(self.load)
-        # GUI, if -g option
-        if self.opt['g']:
-            self.gui = gui.GUI(self.reader.done)
-            self.gui.start(self.logFiles)
+        # GO!
         reactor.run()
 
 
