@@ -20,7 +20,7 @@ class DTK(object):
     I maintain a CPU-efficient but somewhat memory expensive lookup
     tree for datetime objects.
     """
-    units = ['year', 'month', 'day', 'hour', 'minute', 'second']
+    units = ['year', 'month', 'day', 'hour', 'minute']#, 'second']
 
     def __init__(self, rows=[]):
         self.N = 0

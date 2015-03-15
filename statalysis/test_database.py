@@ -37,10 +37,9 @@ class TestDTK(TestCase):
         self.assertEqual(
             dtk.x,
             {2015: {
-                2: {20: {12: {2:  [49]}}},
-                3: {2:  {21: {17: [16]}}}
-                }}
-            )
+                2: {20: {12: [2]}},
+                3: {2:  {21: [17]}}},
+             })
 
     def test_check(self):
         dtk = database.DTK()
