@@ -338,21 +338,14 @@ class Reader(Base):
         during the run.
         """
         def gotSomeResults(result, fileName, dtFile):
-            if result:
-                ipList, records = result
-                N_records = self.rk.len(records)
-                self.fileStatus(
-                    fileName, "{:d} purges, {:d} records",
-                    len(ipList), N_records)
-                dq.put((dtFile, result, fileName))
-                if self.w:
-                    dWriteList.append(self.w.write(records))
-            else:
-                # Retry
-                self.msgWarning(
-                    "Timeout of parser for '{}', retrying", fileName)
-                self.fileStatus(fileName, "Retrying...")
-                return dispatch(fileName)
+            ipList, records = result
+            N_records = self.rk.len(records)
+            self.fileStatus(
+                fileName, "{:d} purges, {:d} records",
+                len(ipList), N_records)
+            dq.put((dtFile, result, fileName))
+            if self.w:
+                dWriteList.append(self.w.write(records))
 
         def dispatch(fileName):
             def gotInfo(result):
@@ -365,8 +358,9 @@ class Reader(Base):
                 else:
                     self.msgBody("No DB entry", ID=ID)
                 self.fileStatus(fileName, "Parsing...")
+                # AsynQueue needs some work before timeout can be used
                 d = self.pq.call(
-                    'parser', filePath, timeout=self.timeout)
+                    'parser', filePath)#, timeout=self.timeout)
                 d.addCallback(gotSomeResults, fileName, dtFile)
                 d.addErrback(self.oops, "Parsing of '{}'", fileName)
                 return d

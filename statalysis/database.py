@@ -159,9 +159,7 @@ class Transactor(AccessBroker, util.Base):
         ipm = IPMatcher()
         col = self.entries.c
         for sh in self.selectorator(col.dt, col.k, col.ip):
-            pass
-        rp = sh()
-        rows = rp.fetchmany()
+            rows = sh().fetchmany()
         while rows:
             for row in rows:
                 self.dtk.set(row[0])
@@ -404,7 +402,7 @@ class Transactor(AccessBroker, util.Base):
             cols = getattr(getattr(self, name), 'c')
             for sh in self.selectorator(cols.value):
                 sh.where(cols.id == ID)
-            result[name] = sh().first()[0]
+                result[name] = sh().first()[0]
         return result
         
     @defer.inlineCallbacks
@@ -429,9 +427,10 @@ class Transactor(AccessBroker, util.Base):
         returning the (deferred) number of rows that were matched and
         presumably deleted.
         """
-        rp = self.execute(
-            self.entries.delete().where(self.entries.c.ip == ip))
-        return rp.rowcount
+        for sh in self.selectorator(self.entries.delete):
+            sh.where(self.entries.c.ip == ip)
+            result = sh().rowcount
+        return result
 
     @transact
     def hitsForIP(self, ip):
@@ -441,7 +440,8 @@ class Transactor(AccessBroker, util.Base):
         cols = self.entries.c
         for sh in self.selectorator(SA.func.count(cols.http)):
             sh.where(cols.ip == ip)
-        return sh().first()[0]
+            result = sh().first()[0]
+        return result
 
     @transact
     def fileInfo(self, fileName, *args):
