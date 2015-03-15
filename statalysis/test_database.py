@@ -33,33 +33,32 @@ def makeEntry(http, was_rd, ip, *ids):
 class TestDTK(TestCase):
     def test_init(self):
         dtk = database.DTK(ROWS)
-        self.assertEqual(len(dtk), 3)
+        self.assertEqual(len(dtk), 2)
         self.assertEqual(
             dtk.x,
             {2015: {
-                2: {20: {12: {2:  {49: [0, 1]}}}},
-                3: {2:  {21: {17: {16: [0]}}}}}}
+                2: {20: {12: {2:  [49]}}},
+                3: {2:  {21: {17: [16]}}}
+                }}
             )
 
     def test_check(self):
         dtk = database.DTK()
-        self.assertFalse(dtk.check(dt1, 0))
+        self.assertFalse(dtk.check(dt1))
         dtk.load(ROWS)
-        self.assertTrue(dtk.check(dt1, 0))
-        self.assertTrue(dtk.check(dt1, 1))
-        self.assertFalse(dtk.check(dt1, 2))
-        self.assertTrue(dtk.check(dt2, 0))
-        self.assertFalse(dtk.check(dt2, 1))
+        self.assertTrue(dtk.check(dt1))
+        self.assertTrue(dtk.check(dt2))
+        self.assertFalse(dtk.check(dt3))
 
     def test_set(self):
         dtk = database.DTK()
-        self.assertFalse(dtk.check(dt1, 0))
-        dtk.set(dt1, 0)
-        self.assertTrue(dtk.check(dt1, 0))
-        self.assertFalse(dtk.check(dt1, 1))
-        dtk.set(dt1, 1)
-        self.assertTrue(dtk.check(dt1, 1))
-        self.assertFalse(dtk.check(dt1, 2))
+        self.assertFalse(dtk.check(dt1))
+        dtk.set(dt1)
+        self.assertTrue(dtk.check(dt1))
+        self.assertFalse(dtk.check(dt2))
+        dtk.set(dt3)
+        self.assertTrue(dtk.check(dt3))
+        self.assertFalse(dtk.check(dt2))
         
 
 class TestTransactor(TestCase):

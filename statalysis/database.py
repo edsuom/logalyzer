@@ -17,7 +17,8 @@ from sift import IPMatcher
 
 class DTK(object):
     """
-    I maintain an efficient lookup tree for dt-k combinations.
+    I maintain a CPU-efficient but somewhat memory expensive lookup
+    tree for datetime objects.
     """
     units = ['year', 'month', 'day', 'hour', 'minute', 'second']
 
@@ -31,39 +32,51 @@ class DTK(object):
 
     def load(self, rows):
         """
-        Load a list of dt-k combinations.
+        Load a list of datetime objects or rows whose first element is
+        a datetime object.
         """
-        for dtThis, kThis in rows:
-            self.set(dtThis, kThis)
+        for dt in rows:
+            if isinstance(dt, (list, tuple)):
+                dt = dt[0]
+            self.set(dt)
 
-    def check(self, dt, k):
+    def _uniterator(self, dt):
         """
-        Check the specified dt-k combination, returning C{True} if
-        it's in my lookup tree.
+        Iterates over values for each time unit of the supplied
+        datetime object, yielding an integer number of positions to
+        the last time unit and the value for that time unit.
+        """
+        N = len(self.units)
+        for k, unitName in enumerate(self.units):
+            yield N-k-1, getattr(dt, unitName)
+
+    def check(self, dt):
+        """
+        Check the specified datetime object, returning C{True} if it's
+        in my lookup tree.
         """
         stuff = self.x
-        for unitVal in [getattr(dt, x) for x in self.units]:
+        for p, unitVal in self._uniterator(dt):
             if unitVal not in stuff:
                 return False
-            stuff = stuff[unitVal]
-        return (k in stuff)
+            if p > 0:
+                stuff = stuff[unitVal]
+        return True
 
-    def set(self, dt, k):
+    def set(self, dt):
         """
-        Sets an entry in my lookup tree for the specified dt-k
-        combination.
+        Sets an entry in my lookup tree for the specified datetime
+        object.
         """
         stuff = self.x
-        unitList = [getattr(dt, x) for x in self.units]
-        for unitName in self.units:
-            unitVal = getattr(dt, unitName)
-            if unitName == 'second':
-                stuff = stuff.setdefault(unitVal, [])
-            else:
+        for p, unitVal in self._uniterator(dt):
+            if p > 1:
                 stuff = stuff.setdefault(unitVal, {})
-        if k not in stuff:
-            stuff.append(k)
-            self.N += 1
+            elif p == 1:
+                stuff = stuff.setdefault(unitVal, [])
+            elif unitVal not in stuff:
+                stuff.append(unitVal)
+                self.N += 1
 
 
 class Transactor(AccessBroker, util.Base):
@@ -151,7 +164,7 @@ class Transactor(AccessBroker, util.Base):
         rows = rp.fetchmany()
         while rows:
             for row in rows:
-                self.dtk.set(row[0], row[1])
+                self.dtk.set(row[0])
                 ipm.addIP(row[2], ignoreCache=True)
             rows = rp.fetchmany()
         return ipm
@@ -220,25 +233,25 @@ class Transactor(AccessBroker, util.Base):
 
         # Check the lookup tree first
         pleaseInsert = True
-        wasInDTK = self.dtk.check(dt, k)
+        wasInDTK = self.dtk.check(dt)
         if wasInDTK:
-            # There appears to be a dt-k entry already...
+            # There appears to be at least a dt entry already...
             row = yield self.getEntry(dt, k)
             if row:
-                # ... yes, indeed; we won't be inserting anything for
-                # this dt-k combination
+                # ... yes, and also for this k; we won't be inserting
+                # anything for this dt-k combination
                 pleaseInsert = False
                 # But let's check the existing row and return a 'c' if
                 # there's a conflict, or a 'p' if not.
                 code = yield checkExisting(row)
-            # ... no, we must have purged it. No biggie.
+            # ... no, we must have purget it or it's for a different k.
         if pleaseInsert:
             # Insert new entry
             wasInserted = yield self.insertEntry(dt, k, values)
             if wasInserted:
                 code = 'a'
                 if not wasInDTK:
-                    self.dtk.set(dt, k)
+                    self.dtk.set(dt)
             else:
                 code = 'f'
         defer.returnValue(code)
