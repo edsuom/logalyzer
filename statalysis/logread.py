@@ -293,6 +293,7 @@ class Reader(Base):
         self.info = info
         self.verbose = verbose
         self.gui = gui
+        self.isRunning = False
 
     def getMatchers(self, rules):
         result = {}
@@ -316,9 +317,13 @@ class Reader(Base):
     @defer.inlineCallbacks
     def done(self):
         """
-        Call this after my run is done to shut everything down.
+        Call this to shut everything down.
         """
-        self.msgHeading("Shutting down")
+        if self.isRunning:
+            self.dShutdown = defer.Deferred
+            yield self.dShutdown
+        self.isRunning = False
+        self.msgHeading("Shutting down reader...")
         yield self.pq.shutdown()
         self.msgBody("Process queue shut down")
         yield self.rk.shutdown()
@@ -377,7 +382,7 @@ class Reader(Base):
 
         @defer.inlineCallbacks
         def resultsLoop(*args):
-            while filesLeft:
+            while self.isRunning and filesLeft:
                 dtFile, result, fileName = yield dq.get()
                 filesLeft.remove(fileName)
                 if result is None:
@@ -395,9 +400,6 @@ class Reader(Base):
                         ip, fileName)
                     dList.append(d)
                 N_total = self.rk.len(records)
-                #self.fileStatus(
-                #    fileName,
-                #    "Adding {:d} records", N_total)
                 d = self.rk.addRecords(records, fileName)
                 d.addErrback(
                     self.oops,
@@ -417,8 +419,12 @@ class Reader(Base):
             yield defer.DeferredList(dWriteList)
             if self.w:
                 yield self.w.close()
-            defer.returnValue(self.rk.getIPs())
+            result = self.rk.getIPs()
+            if hasattr(self, 'dShutdown'):
+                self.dShutdown.callback(result)
+            defer.returnValue(result)
 
+        self.isRunning = True
         dWriteList = []
         dq = defer.DeferredQueue()
         filesLeft = copy(self.fileNames)

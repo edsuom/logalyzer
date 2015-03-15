@@ -9,7 +9,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 import math
 
-from twisted.internet import reactor
+from twisted.internet import reactor, defer
 
 import urwid as u
 from urwid.raw_display import Screen
@@ -297,8 +297,9 @@ class GUI(object):
          'brown', 'default', 'default'),
     ]
     
-    def __init__(self):
+    def __init__(self, *stoppers):
         self.running = False
+        self.stoppers = stoppers
         self.id_counter = 0
         # A screen is useful right away
         self.screen = Screen()
@@ -313,9 +314,8 @@ class GUI(object):
             if key in ('q', 'Q'):
                 # NOTE: The warning doesn't show up when program
                 # hangs, but does quit.
-                self.warning("Stopping...")
                 reactor.stop()
-        
+                
         # The top-level widgets
         self.m = Messages()
         self.f = Files(fileNames, self._dims()[0])
@@ -353,13 +353,17 @@ class GUI(object):
 
     def stop(self):
         """
-        Tears down the GUI display. You shouldn't need to call this method
-        directly because it will be called when the reactor is shut
-        down.
+        Runs stopper functions and tears down the GUI display just before
+        the reactor is stopped.
         """
-        self.screen.unhook_event_loop(self.loop)
-        self.loop.stop()
-        self.running = False
+        def cb(null):
+            self.screen.unhook_event_loop(self.loop)
+            self.loop.stop()
+            self.running = False
+        
+        self.warning("Stopping...")
+        dList = [defer.maybeDeferred(func) for func in self.stoppers]
+        return defer.DeferredList(dList).addBoth(cb)
     
     def msgHeading(self, textProto, *args):
         """

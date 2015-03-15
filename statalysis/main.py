@@ -211,6 +211,9 @@ class Recorder(Base):
             self.logFiles.extend(self.filesInDir(path=arg, pattern=pattern))
         if not self.logFiles:
             self.logFiles = self.filesInDir(pattern=pattern)
+        if not self.logFiles:
+            raise RuntimeError(
+                "No logfiles specified or in current directory")
 
     def loadRules(self, consolidate=False):
         """
@@ -291,9 +294,6 @@ class Recorder(Base):
             self.consolidate(outPath)
             return
         self.parseArgs()
-        if self.opt['g']:
-            self.gui = gui.GUI()
-            self.gui.start(self.logFiles)
         # Writer
         fileTypes = []
         if self.opt['f']:
@@ -302,6 +302,10 @@ class Recorder(Base):
         # Reader, which may call the writer
         self.reader = self.readerFactory(self.opt[0], self.w)
         reactor.callWhenRunning(self.load)
+        # GUI, if -g option
+        if self.opt['g']:
+            self.gui = gui.GUI(self.reader.done)
+            self.gui.start(self.logFiles)
         reactor.run()
 
 
