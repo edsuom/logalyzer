@@ -52,7 +52,7 @@ class CacheManager(object):
         """
         if not hasattr(self, 'caches'):
             self.caches = []
-        thisCache = deque([])
+        thisCache = deque()
         self.caches.append(thisCache)
         k = len(self.caches) - 1
         if name is None:
