@@ -299,7 +299,7 @@ class GUI(object):
     
     def __init__(self, *stoppers):
         self.running = False
-        self.stoppers = stoppers
+        self.stoppers = list(stoppers)
         self.id_counter = 0
         # A screen is useful right away
         self.screen = Screen()

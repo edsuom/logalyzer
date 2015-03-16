@@ -68,6 +68,8 @@ class DTK(object):
         Sets an entry in my lookup tree for the specified datetime
         object.
         """
+        # Disabled for memory leak debugging
+        return
         stuff = self.x
         for p, unitVal in self._uniterator(dt):
             if p > 1:
@@ -160,11 +162,12 @@ class Transactor(AccessBroker, util.Base):
         col = self.entries.c
         for sh in self.selectorator(col.dt, col.k, col.ip):
             rows = sh().fetchmany()
-        while rows:
-            for row in rows:
-                self.dtk.set(row[0])
-                ipm.addIP(row[2], ignoreCache=True)
-            rows = rp.fetchmany()
+            while rows:
+                for row in rows:
+                    self.dtk.set(row[0])
+                    ipm.addIP(row[2], ignoreCache=True)
+        # All of that ipm setting was done inside the loop, now let
+        # the resultproxy close and return our fully setup ip matcher
         return ipm
 
     @transact
@@ -273,10 +276,14 @@ class Transactor(AccessBroker, util.Base):
 
     @transact
     def getMaxSequence(self, dt):
+        # Memory leak here? Might produce a lot of those [0] lists I'm seeing.
         if not self.s('max_sequence'):
             c = self.entries.c
             self.s([SA.func.max(c.k)], c.dt == SA.bindparam('dt'))
-        return self.s().execute(dt=dt).first()[0]
+        rp = self.s().execute(dt=dt)
+        k = rp.first()[0]
+        rp.close()
+        return k
 
     def _getID(self, name, value):
         """

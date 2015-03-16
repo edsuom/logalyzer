@@ -5,6 +5,20 @@
 LICENSE
 Copyright (C) 2014-2015 Tellectual LLC
 
+Lots of lists. At 20th file result, 15406 lists:
+
+hd[0].byvia
+----------------------
+13k [0]
+642 [1]
+406 [2]
+ 18 [3]
+  8 [4]
+  6 [5]
+  6 [5]
+
+Pretty clear these are k values from dt-k
+
 """
 
 import os, re, gzip
@@ -338,6 +352,20 @@ class Reader(Base):
         during the run.
         """
         def gotSomeResults(result, fileName, dtFile):
+            # DEBUG memory leak
+            # -------------------------------
+            self.N_iter += 1
+            h1 = hp.heap()
+            hd = h1 #- self.h0
+            #self.h0 = h1
+            print hd
+            b = hd.byrcs
+            print b
+            if self.N_iter > 20:
+                import pdb
+                pdb.set_trace()
+            # -------------------------------
+            # At this point, offender is lists: See top docstring.
             ipList, records = result
             N_records = self.rk.len(records)
             self.fileStatus(
@@ -417,6 +445,15 @@ class Reader(Base):
             if hasattr(self, 'dShutdown'):
                 self.dShutdown.callback(result)
             defer.returnValue(result)
+
+
+        # DEBUG memory leak
+        # -------------------------------
+        self.N_iter = 0
+        from guppy import hpy
+        hp = hpy()
+        hp.setrelheap()
+        # -------------------------------
 
         self.isRunning = True
         dWriteList = []

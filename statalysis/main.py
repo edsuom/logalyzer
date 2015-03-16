@@ -306,7 +306,8 @@ class Recorder(Base):
         # Reader, which may call the writer
         self.reader = self.readerFactory(self.opt[0], self.w)
         # GUI will stop reader when it shuts down
-        self.gui.stoppers.append(self.reader.done)
+        if self.gui:
+            self.gui.stoppers.append(self.reader.done)
         # Everything starts with my load method
         reactor.callWhenRunning(self.load)
         # GO!
