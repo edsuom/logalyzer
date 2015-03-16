@@ -356,21 +356,38 @@ class Reader(Base):
             # -------------------------------
             self.N_iter += 1
             h1 = hp.heap()
-            hd = h1 #- self.h0
-            #self.h0 = h1
-            print hd
-            b = hd.byrcs
-            print b
+            print h1
+            print h1.byrcs
+            objgraph.show_growth(limit=10)
             if self.N_iter > 20:
                 import pdb
                 pdb.set_trace()
             # -------------------------------
-            # At this point, offender is lists: See top docstring.
+            # The records are never getting freed from memory
+            # It seems like each "thisRecord" is getting stored somewhere
+
+            # (Pdb) h1[0].referents[0].byvia
+            # Partition of a set of 56174 objects. Total size = 5505272 bytes.
+            #  Index  Count   %     Size   % Cumulative  % Referred Via:
+            #      0  13720  24  2011976  37   2011976  37 "['ua']"
+            #      1   6862  12  1434064  26   3446040  63 "['ref']"
+            #      2  12667  23   796272  14   4242312  77 "['vhost']"
+            #      3  14062  25   778960  14   5021272  91 "['ip']"
+            #      4   8621  15   473112   9   5494384 100 "['url']"
+            #      5     24   0     1176   0   5495560 100 '.keys()[0]'
+            #      6     24   0     1008   0   5496568 100 '.keys()[1]'
+            #      7     21   0     1008   0   5497576 100 '.keys()[3]'
+            #      8     21   0     1008   0   5498584 100 '.keys()[6]'
+            #      9     21   0      840   0   5499424 100 '.keys()[2]'
+
             ipList, records = result
             N_records = self.rk.len(records)
             self.fileStatus(
                 fileName, "{:d} purges, {:d} records",
                 len(ipList), N_records)
+            # NOTE: Using this instead of the real dq.put stops the
+            #memory leak, along with all functionality.
+            #dq.put((dtFile, None, fileName))
             dq.put((dtFile, result, fileName))
             if self.w:
                 dWriteList.append(self.w.write(records))
@@ -398,19 +415,22 @@ class Reader(Base):
             dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
             self.msgBody("File datetime: {}", dtFile, ID=ID)
             # TODO: WHY is the bottom line not working????
-            return gotInfo(None)
-            #return self.t.fileInfo(
-            #    fileName).addCallbacks(gotInfo, self.oops)
+            #return gotInfo(None)
+            # Now it seems to be, after changes to fileInfo
+            return self.t.fileInfo(
+                fileName).addCallbacks(gotInfo, self.oops)
 
         @defer.inlineCallbacks
         def resultsLoop(*args):
             while self.isRunning and filesLeft:
-                dtFile, result, fileName = yield dq.get()
+                dtFile, stuff, fileName = yield dq.get()
                 filesLeft.remove(fileName)
-                if result is None:
+                # NOTE: Always skipping for debug. Still leaks, even
+                # when this is all that's done!
+                if True or stuff is None:
                     # Non-parsed file, reflected already in DB
                     continue
-                ipList, records = result
+                ipList, records = stuff
                 self.fileStatus(fileName, "Purging & adding...")
                 dList = []
                 for ip in ipList:
@@ -422,7 +442,10 @@ class Reader(Base):
                         ip, fileName)
                     dList.append(d)
                 N_total = self.rk.len(records)
-                d = self.rk.addRecords(records, fileName)
+                # NOTE: Skipping the actual write for memory leak debugging 
+                # Still leaks!!!
+                d = defer.succeed(N_total)
+                #d = self.rk.addRecords(records, fileName)
                 d.addErrback(
                     self.oops,
                     "Trying to add records for {}", fileName)
@@ -450,6 +473,8 @@ class Reader(Base):
         # DEBUG memory leak
         # -------------------------------
         self.N_iter = 0
+        import objgraph
+        objgraph.show_growth(limit=10)
         from guppy import hpy
         hp = hpy()
         hp.setrelheap()

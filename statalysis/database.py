@@ -20,7 +20,7 @@ class DTK(object):
     I maintain a CPU-efficient but somewhat memory expensive lookup
     tree for datetime objects.
     """
-    units = ['year', 'month', 'day', 'hour', 'minute']#, 'second']
+    units = ['year', 'month', 'day', 'hour', 'minute', 'second']
 
     def __init__(self, rows=[]):
         self.N = 0
@@ -68,8 +68,6 @@ class DTK(object):
         Sets an entry in my lookup tree for the specified datetime
         object.
         """
-        # Disabled for memory leak debugging
-        return
         stuff = self.x
         for p, unitVal in self._uniterator(dt):
             if p > 1:
@@ -183,8 +181,8 @@ class Transactor(AccessBroker, util.Base):
                 cList,
                 SA.and_(col.dt == SA.bindparam('dt'),
                         col.k == SA.bindparam('k')))
-        row = self.s().execute(dt=dt, k=k).first()
-        return row
+        self.rp = self.s().execute(dt=dt, k=k)
+        return self.rp.first()
 
     @transact
     def insertEntry(self, dt, k, values):
@@ -206,8 +204,8 @@ class Transactor(AccessBroker, util.Base):
             return False
         for kk, name in enumerate(self.colNames):
             kw[name] = values[kk]
-        rp = self.entries.insert().execute(**kw)
-        return rp.is_insert
+        self.rp = self.entries.insert().execute(**kw)
+        return self.rp.is_insert
     
     @defer.inlineCallbacks
     def setEntry(self, dt, k, values):
@@ -266,7 +264,8 @@ class Transactor(AccessBroker, util.Base):
         table = getattr(self, name)
         if not self.s("s_{}".format(name)):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
-        row = self.s().execute(value=value).first()
+        self.rp = self.s().execute(value=value)
+        row = self.rp.first()
         if row:
             ID = row[0]
         else:
@@ -280,9 +279,8 @@ class Transactor(AccessBroker, util.Base):
         if not self.s('max_sequence'):
             c = self.entries.c
             self.s([SA.func.max(c.k)], c.dt == SA.bindparam('dt'))
-        rp = self.s().execute(dt=dt)
-        k = rp.first()[0]
-        rp.close()
+        self.rp = self.s().execute(dt=dt)
+        k = self.rp.first()[0]
         return k
 
     def _getID(self, name, value):
@@ -294,7 +292,9 @@ class Transactor(AccessBroker, util.Base):
         Runs asynchronously; don't call from a transact method.
         """
         def done(ID):
-            # Order of the following two lines could be important
+            # The order of the following two lines might be important
+            # if all transactions didn't run in a single thread. But
+            # they do.
             valueDict[value] = ID
             self._pendingID(name, value, clear=True)
             return ID
@@ -303,17 +303,17 @@ class Transactor(AccessBroker, util.Base):
         # Truncate any overly long values now, before they cause any
         # complications in the DB check or insertion
         value = value[:self.valueLength]
-        # TODO: Restore caching (maybe) when weirdness gets sorted out
-        #if self.cm.check(name, value) and value in valueDict:
-        if value in valueDict:
+        if self.cm.check(name, value) and value in valueDict:
             # Cached ID
             return defer.succeed(valueDict[value])
         # Get ID from DB for value, at high priority
         dID = self._pendingID(name, value)
         if dID is None:
-            #discardedValue = self.cm.set(name, value)
-            #if discardedValue in valueDict:
-            #    del valueDict[discardedValue]
+            discardedValue = self.cm.set(name, value)
+            if discardedValue in valueDict:
+                # This is important! Otherwise ALL values accumulate
+                # in memory, which can get HUGE!
+                del valueDict[discardedValue]
             # No pending DB fetches now, so do one in its own 
             # high-priority transaction
             d = self.setNameValue(name, value, niceness=-15)
@@ -478,7 +478,8 @@ class Transactor(AccessBroker, util.Base):
             self.s(
                 [cols.dt, cols.records],
                 cols.name == SA.bindparam('name'))
-        return self.s().execute(name=fileName).first()
+        self.rp = self.s().execute(name=fileName)
+        return self.rp.first()
 
     @transact
     def deleteFileInfo(self, fileName):

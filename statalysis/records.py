@@ -241,16 +241,16 @@ class MasterRecordKeeper(Base):
     @defer.inlineCallbacks
     def addRecords(self, records, fileName):
         N = 0
+        N_records = self.len(records)
         count = 0
         ID = self.msgHeading(
-            "Adding {:d} records for '{}'", self.len(records), fileName)
+            "Adding {:d} records for '{}'", N_records, fileName)
         for dt, theseRecords in records.iteritems():
             for k, thisRecord in enumerate(theseRecords):
                 d = self.addRecord(dt, k, thisRecord)
                 d.addErrback(
                     self.oops,
-                    "addRecords(<{:d} records>, {}",
-                    self.len(records), fileName)
+                    "addRecords(<{:d} records>, {}", N_records, fileName)
                 self.fileProgress(fileName)
                 inc = yield d
                 N += inc
