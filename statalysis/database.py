@@ -158,7 +158,7 @@ class Transactor(AccessBroker, util.Base):
         self.dtk = DTK()
         ipm = IPMatcher()
         col = self.entries.c
-        for sh in self.selectorator(col.dt, col.k, col.ip):
+        with self.selex(col.dt, col.k, col.ip) as sh:
             rows = sh().fetchmany()
             while rows:
                 for row in rows:
@@ -407,7 +407,7 @@ class Transactor(AccessBroker, util.Base):
         for k, ID in enumerate(IDs):
             name = self.indexedValues[k]
             cols = getattr(getattr(self, name), 'c')
-            for sh in self.selectorator(cols.value):
+            with self.selex(cols.value) as sh:
                 sh.where(cols.id == ID)
                 result[name] = sh().first()[0]
         return result
@@ -434,7 +434,7 @@ class Transactor(AccessBroker, util.Base):
         returning the (deferred) number of rows that were matched and
         presumably deleted.
         """
-        for sh in self.selectorator(self.entries.delete):
+        with self.selex(self.entries.delete) as sh:
             sh.where(self.entries.c.ip == ip)
             result = sh().rowcount
         return result
@@ -445,7 +445,7 @@ class Transactor(AccessBroker, util.Base):
         Returns the number of entries for the specified IP address
         """
         cols = self.entries.c
-        for sh in self.selectorator(SA.func.count(cols.http)):
+        with self.selex(SA.func.count(cols.http)) as sh:
             sh.where(cols.ip == ip)
             result = sh().first()[0]
         return result
