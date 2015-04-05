@@ -19,9 +19,6 @@ class DTK(object):
     """
     I maintain a CPU-efficient but somewhat memory expensive lookup
     tree for datetime objects.
-
-    The item value at each leaf node is an integer indicating how many
-    records are in the database for that exact-to-the-second datetime.
     """
     units = ['year', 'month', 'day', 'hour', 'minute', 'second']
 
@@ -48,8 +45,6 @@ class DTK(object):
         Iterates over values for each time unit of the supplied
         datetime object, yielding an integer number of positions to
         the last time unit and the value for that time unit.
-
-        TODO: Account for new k info
         """
         N = len(self.units)
         for k, unitName in enumerate(self.units):
@@ -57,11 +52,8 @@ class DTK(object):
 
     def check(self, dt):
         """
-        Check the specified datetime object, returning the number of
-        database records for it if it's in my lookup tree, zero if
-        it's not.
-
-        TODO: Implement this change
+        Check the specified datetime object, returning C{True} if it's
+        in my lookup tree.
         """
         stuff = self.x
         for p, unitVal in self._uniterator(dt):
@@ -75,8 +67,6 @@ class DTK(object):
         """
         Sets an entry in my lookup tree for the specified datetime
         object.
-
-        TODO: Account for new k info
         """
         stuff = self.x
         for p, unitVal in self._uniterator(dt):
@@ -125,19 +115,17 @@ class Transactor(AccessBroker, util.Base):
     
     @defer.inlineCallbacks
     def startup(self):
+        # Primary key is an auto-incrementing index, which can be used
+        # to find out the order in which requests were made within a
+        # single second.
         yield self.table(
             'entries',
-            SA.Column(
-                'dt', SA.DateTime,
-                primary_key=True),
-            SA.Column(
-                'k', SA.SmallInteger,
-                primary_key=True,
-                autoincrement=False),
+            SA.Column('id', SA.SmallInteger,
+                      primary_key=True, autoincrement=True),
+            SA.Column('dt', SA.DateTime, nullable=False)
+            SA.Column('ip', SA.String(15), nullable=False),
             SA.Column('http', SA.SmallInteger, nullable=False),
             SA.Column('was_rd', SA.Boolean, nullable=False),
-            SA.Column('ip', SA.String(15), nullable=False),
-            
             SA.Column('id_vhost', SA.Integer, nullable=False),
             SA.Column('id_url', SA.Integer, nullable=False),
             SA.Column('id_ref', SA.Integer),
@@ -168,7 +156,7 @@ class Transactor(AccessBroker, util.Base):
         self.dtk = DTK()
         ipm = IPMatcher()
         col = self.entries.c
-        with self.selex(col.dt, col.k, col.ip) as sh:
+        with self.selex(col.dt, col.ip) as sh:
             rows = sh().fetchmany()
             while rows:
                 for row in rows:
@@ -176,56 +164,46 @@ class Transactor(AccessBroker, util.Base):
                     ipm.addIP(row[2], ignoreCache=True)
         # All of that setup was done inside the loop. Now let the
         # resultproxy close and return a reference to our fully setup
-        # DTK and IPMatcher objects. It might seem dangerous to share
-        # the DTK object outside the thread, but it shall only be read
-        # outside, and modified only inside the thread.
-        return self.dtk, ipm
+        # IPMatcher object.
+        return ipm
 
     @transact
-    def getEntry(self, dt, k):
+    def getEntries(self, dt):
         """
-        Returns all of the columns after dt, k for one unique dt-k
-        combination in the entries table.
+        Returns all of the columns after dt for one datetime second of
+        entries.
         """
         col = self.entries.c
         if not self.s('s_entry'):
             cList = [getattr(col, x) for x in self.colNames]
-            self.s(
-                cList,
-                SA.and_(col.dt == SA.bindparam('dt'),
-                        col.k == SA.bindparam('k')))
-        self.rp = self.s().execute(dt=dt, k=k)
-        return self.rp.first()
+            self.s(cList, col.dt == SA.bindparam('dt'))
+        return self.s().execute(dt=dt)
 
     @transact
-    def insertEntry(self, dt, k, values):
+    def insertEntry(self, dt, values):
         """
-        Inserts a DB entry for the specified dt-k combination, using the
-        supplied dict values.
+        Inserts a DB entry for the specified datetime, using the supplied
+        dict values.
 
-        You must ensure that the dt-k combination is not already in
-        the DB and that there is one value for each name defined in
-        I{colNames}.
-
-        Returns C{True} if the entry was inserted, C{False} if not.
-
+        You must ensure that there is one value for each name
+        defined in I{colNames}.
+        
         """
-        kw = {'dt': dt, 'k': k}
+        kw = {'dt': dt}
         N = [len(x) for x in (self.colNames, values)]
         if N[0] > N[1]:
             self.msgWarning("Need {:d} values entries, only got {:d}", *N)
-            return False
+            return
         for kk, name in enumerate(self.colNames):
             kw[name] = values[kk]
-        self.rp = self.entries.insert().execute(**kw)
-        return self.rp.is_insert
+        self.entries.insert().execute(**kw)
     
     @defer.inlineCallbacks
     def setEntry(self, dt, k, values):
         """
-        Adds a new entry to the database for the specified
-        datetime-sequence combination dt-k. See my colNames attribute
-        for the six values you need to supply.
+        Adds a new entry to the database for the specified datetime
+        dt. See my colNames attribute for the six values you need to
+        supply.
 
         Returns a deferred that fires with one of three status values:
 
@@ -235,7 +213,6 @@ class Transactor(AccessBroker, util.Base):
            values, you need to add another one with a different k.
         a: Added: No matching dt-k entry found, so one was added.
         f: Failed to insert for some reason.
-
         """
         def checkExisting(rowValues):
             for kk, value in enumerate(rowValues):
@@ -245,11 +222,10 @@ class Transactor(AccessBroker, util.Base):
 
         # Check the lookup tree first
         pleaseInsert = True
-        kInDTK = self.dtk.check(dt)
-        if kInDTK >= k:
+        if self.dtk.check(dt):
             # There appears to be at least a dt entry already...
-            row = yield self.getEntry(dt, k)
-            if row:
+            entries = yield self.getEntries(dt)
+            for row in iter(entries):
                 # ... yes, and also for this k; we won't be inserting
                 # anything for this dt-k combination
                 pleaseInsert = False
@@ -341,16 +317,16 @@ class Transactor(AccessBroker, util.Base):
         return d
 
     @defer.inlineCallbacks
-    def setRecord(self, dt, k, record, isRetry=False):
+    def setRecord(self, dt, record, isRetry=False):
         """
-        Adds all needed database entries for the supplied record at
-        the specified datetime-sequence combination dt-k.
+        Adds all needed database entries for the supplied record at the
+        specified datetime.
 
         Returns a deferred that fires with
 
-        - C{None} if a new database entry was written,
-
-        - a new value of k if there was a conflict with an existing
+        TODO: Conform this to the new no-k schema
+        
+        - The index k indicating if there was a conflict with an existing
           dt-k combination and the new value had to be obtained
 
         - the old k value if there was the same exact entry (no
@@ -361,7 +337,6 @@ class Transactor(AccessBroker, util.Base):
         A conflict exists when there is already an entry for the
         specified dt-k combination that matches values than the ones
         in your supplied record.
-
         """
         if not hasattr(self, 'cm'):
             self.cacheSetup()
@@ -428,6 +403,8 @@ class Transactor(AccessBroker, util.Base):
     @defer.inlineCallbacks
     def getRecord(self, dt, k):
         """
+        NOW BOGUS, AND ONLY USED FOR TESTING-DELETE OR REWRITE
+        
         Returns a (deferred) dict containing the record for the specified
         datetime-sequence combination dt-k.
         """
