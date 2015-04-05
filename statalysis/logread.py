@@ -25,12 +25,11 @@ import os, re, gzip
 from copy import copy
 from datetime import datetime
 
+from zope.interface import implements
 from twisted.internet import defer, reactor
+from twisted.internet.interfaces import IConsumer
 
-# DEBUG
-#defer.Deferred.debug = True
-
-from asynqueue import ProcessQueue
+import asynqueue
 
 from util import *
 import sift
@@ -234,9 +233,10 @@ class Parser(Base):
         # botMatcher and refMatcher so we can harvest the most bot IP
         # addresses (useful if -i option set)
         if self.botMatcher(ip, url) or self.refMatcher(ip, ref):
-            if self.rk.purgeIP(ip):
+            wasPurged = self.rk.purgeIP(ip)
+            if wasPurged:
                 self.msgBody(line)
-            return
+            return ip
         if self.exclude:
             if http in self.exclude:
                 # Excluded code
@@ -259,13 +259,12 @@ class Parser(Base):
         if self.netMatcher(ip):
             return
         return dt, record
-    
-    def __call__(self, fileName):
+
+    def processator(self, fileName):
         """
-        The public interface to parse a logfile. My processes call this
-        via the queue.
+        Processes the specified logfile, yielding nasty IP addresses as
+        they are identified and purging them from my records.
         """
-        self.rk.clear()
         fh = self.file(fileName)
         for line in fh:
             try:
@@ -279,11 +278,34 @@ class Parser(Base):
                     eType.__name__, eValue, fileName, line)
                 traceback.print_tb(e[2])
                 fh.close()
-                return
-            if stuff:
+                break
+            if isinstance(stuff, (tuple)):
                 self.rk.addRecordToRecords(*stuff)
+            elif stuff:
+                # This line had a newly purged IP address
+                yield stuff
         fh.close()
-        return self.rk.getNewStuff()
+    
+    def __call__(self, fileName):
+        """
+        The public interface to parse a logfile. My processes call this
+        via the queue to iterate first over IP addresses being purged
+        and then records added as a result of parsing. The caller must
+        differentiate between strings (purged IP addresses) and tuples
+        (datetime, record).
+
+        A later optimization may avoid the need for my recordkeeper to
+        store the records, in which case it will just yield them
+        without storing them, unpredicatably interspersed with nasty
+        IP addresses, and let the caller do all the purging. So don't
+        put any stock in when you get what iterated.
+        """
+        self.rk.clear()
+        for ip in self.processator(fileName):
+            yield ip
+        for dt, theseRecords in self.rk():
+            for thisRecord in theseRecords:
+                yield dt, thisRecord
 
     
 class Reader(Base):
@@ -291,18 +313,15 @@ class Reader(Base):
     I read and parse web server log files
     """
     timeout = 60*10 # Ten minutes per file
-    bogusQueue = False
     
     def __init__(
-            self, logFiles, dbURL, writer=None,
-            cores=None, verbose=False, info=False, warnings=False, gui=None):
+            self, logFiles, dbURL, cores=None,
+            verbose=False, info=False, warnings=False, gui=None):
         #----------------------------------------------------------------------
         self.fileNames = logFiles
         from records import MasterRecordKeeper
         self.rk = MasterRecordKeeper(dbURL, warnings=warnings, gui=gui)
         self.t = self.rk.trans
-        # TODO
-        self.w = None #writer
         self.cores = cores
         self.info = info
         self.verbose = verbose
@@ -316,17 +335,14 @@ class Reader(Base):
             result[matcherName] = thisMatcher
         return result
 
-    def getProcessQueue(self, parser, bogus=False, thread=False):
-        if self.cores is not None and int(self.cores) == 0:
-            thread = True
-        if bogus or thread:
-            return BogusQueue(useThreading=thread, parser=parser)
+    def getQueue(self, thread=False):
+        if thread or (self.cores is not None and int(self.cores) == 0):
+            return asynqueue.ThreadQueue()
         if self.cores is None:
-            import multiprocessing as mp
-            cores = mp.cpu_count() - 1
+            cores = asynqueue.ProcessQueue.cores()
         else:
             cores = int(self.cores)
-        return ProcessQueue(cores, parser=parser)
+        return ProcessQueue(cores)
     
     @defer.inlineCallbacks
     def done(self):
@@ -389,8 +405,6 @@ class Reader(Base):
             #memory leak, along with all functionality.
             #dq.put((dtFile, None, fileName))
             dq.put((dtFile, result, fileName))
-            if self.w:
-                dWriteList.append(self.w.write(records))
 
         def dispatch(fileName):
             def gotInfo(result):
@@ -405,7 +419,7 @@ class Reader(Base):
                 self.fileStatus(fileName, "Parsing...")
                 # AsynQueue needs some work before timeout can be used
                 d = self.pq.call(
-                    'parser', filePath)#, timeout=self.timeout)
+                    parser, filePath, timeout=self.timeout)
                 d.addCallback(gotSomeResults, fileName, dtFile)
                 d.addErrback(self.oops, "Parsing of '{}'", fileName)
                 return d
@@ -425,9 +439,7 @@ class Reader(Base):
             while self.isRunning and filesLeft:
                 dtFile, stuff, fileName = yield dq.get()
                 filesLeft.remove(fileName)
-                # NOTE: Always skipping for debug. Still leaks, even
-                # when this is all that's done!
-                if True or stuff is None:
+                if stuff is None:
                     # Non-parsed file, reflected already in DB
                     continue
                 ipList, records = stuff
@@ -442,14 +454,10 @@ class Reader(Base):
                         ip, fileName)
                     dList.append(d)
                 N_total = self.rk.len(records)
-                # NOTE: Skipping the actual write for memory leak debugging 
-                # Still leaks!!!
-                d = defer.succeed(N_total)
-                #d = self.rk.addRecords(records, fileName)
-                d.addErrback(
-                    self.oops,
-                    "Trying to add records for {}", fileName)
-                N_added = yield d
+                N_added = yield self.rk.addRecords(
+                    records, fileName).addErrback(
+                        self.oops,
+                        "Trying to add records for {}", fileName)
                 self.fileStatus(
                     fileName,
                     "Added {:d} of {:d} records", N_added, N_total)
@@ -462,8 +470,6 @@ class Reader(Base):
                 yield defer.DeferredList(dList)
             # Wait for any file writes and closes, too
             yield defer.DeferredList(dWriteList)
-            if self.w:
-                yield self.w.close()
             result = self.rk.getIPs()
             if hasattr(self, 'dShutdown'):
                 self.dShutdown.callback(result)
@@ -487,7 +493,7 @@ class Reader(Base):
         parser = Parser(
             self.getMatchers(rules),
             vhost, exclude, ignoreSecondary, verbose=self.info)
-        self.pq = self.getProcessQueue(parser)
+        self.pq = self.getQueue()
         # The files are all dispatched at once
         for fileName in self.fileNames:
             # References to the deferreds are stored in the process

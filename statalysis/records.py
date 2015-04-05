@@ -85,17 +85,10 @@ class ParserRecordKeeper(object):
     def purgeIP(self, ip):
         """
         Purges my records of entries from the supplied IP address and
-        appends the IP to a list to be returned when I'm done so that
-        other instances can purge their records of it, too.
-
-        Any further adds from this IP are ignored.
+        appends the IP to a list of IP addresses I ignore in future.
 
         Returns True if this IP was purged (not seen before), False if
         not.
-
-        If I am running with database persistence, returns a deferred
-        that fires with the value when the database has been updated
-        instead of the value itself.
         """
         if ip in self.ipList:
             # Already purged
@@ -134,19 +127,41 @@ class ParserRecordKeeper(object):
         """
         self.newKeys = []
 
-    def getNewStuff(self):
+    def __call__(self):
         """
-        Returns a list of purged IP addresses and the records added since
-        the last clearing
+        Iterates over my records added since the last call to L{clear}.
         """
-        newRecords = {}
         for key in self.newKeys:
             if key in self.records:
                 # Not purged and new, so get it
-                newRecords[key] = self.records[key]
-        return self.ipList, newRecords
+                yield self.records.pop(key)
 
+class ParserConsumer(Base):
+    implements(IConsumer)
+    
+    def __init__(self, masterRecordKeeper, verbose=False):
+        self.rk = masterRecordKeeper
+        self.verbose = verbose
+        self.producer = None
+    
+    def registerProducer(self, producer, streaming):
+        if self.producer:
+            raise RuntimeError()
+        if not streaming:
+            raise TypeError("I only work with push producers")
+        producer.registerConsumer(self)
+        self.msg("Producer {} registered", repr(producer))
+    
+    def unregisterProducer(self):
+        self.producer = None
+        self.msg("Producer unregistered")
 
+    def write(self, data):
+        if isinstance(data, tuple):
+            
+        self.msg("Data received, len: {:d}", len(data))
+
+                
 class MasterRecordKeeper(Base):
     """
     I am the master record keeper that gets fed info from the
@@ -168,7 +183,7 @@ class MasterRecordKeeper(Base):
 
     def startup(self):
         def done(result):
-            self.ipm = result
+            self.dtk, self.ipm = result
         return self.trans.preload().addCallbacks(done, self.oops)
         
     def shutdown(self):
@@ -179,7 +194,14 @@ class MasterRecordKeeper(Base):
         for theseRecords in records.itervalues():
             N += len(theseRecords)
         return N
-    
+
+    def consumerFactory(self):
+        """
+        Constructs and returns a reference to a new L{ParserConsumer} that
+        reports nasty IP addresses and new records back to me.
+        """
+        return ParserConsumer(self, self.verbose)
+        
     def purgeIP(self, ip):
         """
         Purges my records (and database, if any) of entries from the
@@ -214,11 +236,13 @@ class MasterRecordKeeper(Base):
         return self.trans.purgeIP(
             ip, niceness=10).addCallbacks(donePurging, self.oops)
 
-    def addRecord(self, dt, k, record):
+    def addRecord(self, dt, record):
         """
         Called to add the supplied record to the database for the
         specified datetime-sequence combination dt-k, if it's not
         already there.
+
+        # TODO: No k in call
 
         Returns 1 if a new entry was written, 0 if not. Use that
         result to increment a counter.

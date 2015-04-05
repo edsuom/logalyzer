@@ -19,6 +19,9 @@ class DTK(object):
     """
     I maintain a CPU-efficient but somewhat memory expensive lookup
     tree for datetime objects.
+
+    The item value at each leaf node is an integer indicating how many
+    records are in the database for that exact-to-the-second datetime.
     """
     units = ['year', 'month', 'day', 'hour', 'minute', 'second']
 
@@ -45,6 +48,8 @@ class DTK(object):
         Iterates over values for each time unit of the supplied
         datetime object, yielding an integer number of positions to
         the last time unit and the value for that time unit.
+
+        TODO: Account for new k info
         """
         N = len(self.units)
         for k, unitName in enumerate(self.units):
@@ -52,8 +57,11 @@ class DTK(object):
 
     def check(self, dt):
         """
-        Check the specified datetime object, returning C{True} if it's
-        in my lookup tree.
+        Check the specified datetime object, returning the number of
+        database records for it if it's in my lookup tree, zero if
+        it's not.
+
+        TODO: Implement this change
         """
         stuff = self.x
         for p, unitVal in self._uniterator(dt):
@@ -67,6 +75,8 @@ class DTK(object):
         """
         Sets an entry in my lookup tree for the specified datetime
         object.
+
+        TODO: Account for new k info
         """
         stuff = self.x
         for p, unitVal in self._uniterator(dt):
@@ -164,9 +174,12 @@ class Transactor(AccessBroker, util.Base):
                 for row in rows:
                     self.dtk.set(row[0])
                     ipm.addIP(row[2], ignoreCache=True)
-        # All of that ipm setting was done inside the loop, now let
-        # the resultproxy close and return our fully setup ip matcher
-        return ipm
+        # All of that setup was done inside the loop. Now let the
+        # resultproxy close and return a reference to our fully setup
+        # DTK and IPMatcher objects. It might seem dangerous to share
+        # the DTK object outside the thread, but it shall only be read
+        # outside, and modified only inside the thread.
+        return self.dtk, ipm
 
     @transact
     def getEntry(self, dt, k):
@@ -232,8 +245,8 @@ class Transactor(AccessBroker, util.Base):
 
         # Check the lookup tree first
         pleaseInsert = True
-        wasInDTK = self.dtk.check(dt)
-        if wasInDTK:
+        kInDTK = self.dtk.check(dt)
+        if kInDTK >= k:
             # There appears to be at least a dt entry already...
             row = yield self.getEntry(dt, k)
             if row:
@@ -249,7 +262,7 @@ class Transactor(AccessBroker, util.Base):
             wasInserted = yield self.insertEntry(dt, k, values)
             if wasInserted:
                 code = 'a'
-                if not wasInDTK:
+                if kInDTK < k:
                     self.dtk.set(dt)
             else:
                 code = 'f'

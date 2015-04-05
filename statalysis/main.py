@@ -118,7 +118,6 @@ Copyright (C) 2015 Tellectual LLC
 from twisted.internet import reactor
 
 from util import Base
-from writer import Writer
 import logread, gui
 
 
@@ -180,11 +179,7 @@ class RuleReader(Base):
 
 class Recorder(Base):
     """
-    I load records from a Reader and save them in a CSV file
-
-    Look through it with
-
-    less -x5,8,12,16,21,52,69,75,100,200 -S <file.csv>
+    I load records from a Reader and update a database with them.
 
     """
     ruleTable = (
@@ -236,13 +231,12 @@ class Recorder(Base):
                 return theseRules
         return rules
         
-    def readerFactory(self, dbURL, writer=None):
+    def readerFactory(self, dbURL):
         """
         I generate and return a log reader with all its rules loaded 
         """
         return logread.Reader(
             self.logFiles, dbURL,
-            writer=writer,
             cores=self.opt['cores'],
             verbose=self.verbose, info=self.opt['info'],
             warnings=self.opt['w'], gui=self.gui)
@@ -298,13 +292,8 @@ class Recorder(Base):
         if self.opt['g']:
             self.gui = gui.GUI()
             self.gui.start(self.logFiles)
-        # Writer
-        fileTypes = []
-        if self.opt['f']:
-            fileTypes.append(self.opt['f'])
-        self.w = Writer(fileTypes)
-        # Reader, which may call the writer
-        self.reader = self.readerFactory(self.opt[0], self.w)
+        # Reader
+        self.reader = self.readerFactory(self.opt[0])
         # GUI will stop reader when it shuts down
         if self.gui:
             self.gui.stoppers.append(self.reader.done)
