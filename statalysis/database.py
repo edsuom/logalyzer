@@ -86,7 +86,7 @@ class Transactor(AccessBroker, util.Base):
 
     """
     valueLength = 255
-    directValues = ['http', 'was_rd', 'ip']
+    directValues = ['ip', 'http', 'was_rd']
     indexedValues = ['vhost', 'url', 'ref', 'ua']
     colNames = directValues +\
                ["id_{}".format(x) for x in indexedValues]
@@ -145,27 +145,27 @@ class Transactor(AccessBroker, util.Base):
             SA.Column('records', SA.Integer),
         )
         self.pendingID = {}
+        self.dtk = DTK()
+        self.ipm = IPMatcher()
 
-    @transact
+    @defer.inlineCallbacks
     def preload(self):
         """
-        Loads DTK and IPMatcher objects from database (can take a while,
-        but do it while waiting for the first result from the log
-        reader processes).
+        Loads my DTK and IPMatcher objects from the database, returning a
+        deferred that fires when loading is done.
+
+        You don't need to wait for the deferred, though. You can
+        consult these objects via I{dtk} and I{ipm} in the meantime;
+        doing so will save you more and more time as the entries load
+        from the database.
         """
-        self.dtk = DTK()
-        ipm = IPMatcher()
         col = self.entries.c
-        with self.selex(col.dt, col.ip) as sh:
-            rows = sh().fetchmany()
-            while rows:
-                for row in rows:
-                    self.dtk.set(row[0])
-                    ipm.addIP(row[2], ignoreCache=True)
-        # All of that setup was done inside the loop. Now let the
-        # resultproxy close and return a reference to our fully setup
-        # IPMatcher object.
-        return ipm
+        s = self.select(distinct=True)([col.dt, col.ip])
+        dr = yield self.selectorator(s)
+        for d in dr:
+            row = yield d
+            self.dtk.set(row[0])
+            self.ipm.addIP(row[1], ignoreCache=True)
 
     @transact
     def getEntries(self, dt):
@@ -199,7 +199,7 @@ class Transactor(AccessBroker, util.Base):
         self.entries.insert().execute(**kw)
     
     @defer.inlineCallbacks
-    def setEntry(self, dt, k, values):
+    def setEntry(self, dt, values):
         """
         Adds a new entry to the database for the specified datetime
         dt. See my colNames attribute for the six values you need to
@@ -207,11 +207,9 @@ class Transactor(AccessBroker, util.Base):
 
         Returns a deferred that fires with one of three status values:
 
-        p: Present: Matching dt-k entry present with identical values,
+        p: Present: Matching dt entry present with identical values,
            nothing added.
-        c: Conflict: Matching dt-k entry found, but with differing
-           values, you need to add another one with a different k.
-        a: Added: No matching dt-k entry found, so one was added.
+        a: Added: No matching dt entry found, so one was added.
         f: Failed to insert for some reason.
         """
         def checkExisting(rowValues):
@@ -223,7 +221,7 @@ class Transactor(AccessBroker, util.Base):
         # Check the lookup tree first
         pleaseInsert = True
         if self.dtk.check(dt):
-            # There appears to be at least a dt entry already...
+            # There is at least one entry for this dt, so get
             entries = yield self.getEntries(dt)
             for row in iter(entries):
                 # ... yes, and also for this k; we won't be inserting
@@ -253,8 +251,7 @@ class Transactor(AccessBroker, util.Base):
         table = getattr(self, name)
         if not self.s("s_{}".format(name)):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
-        self.rp = self.s().execute(value=value)
-        row = self.rp.first()
+        row = self.s().execute(value=value).first()
         if row:
             ID = row[0]
         else:
@@ -268,9 +265,7 @@ class Transactor(AccessBroker, util.Base):
         if not self.s('max_sequence'):
             c = self.entries.c
             self.s([SA.func.max(c.k)], c.dt == SA.bindparam('dt'))
-        self.rp = self.s().execute(dt=dt)
-        k = self.rp.first()[0]
-        return k
+        return self.s().execute(dt=dt).first()[0]
 
     def _getID(self, name, value):
         """
@@ -468,8 +463,7 @@ class Transactor(AccessBroker, util.Base):
             self.s(
                 [cols.dt, cols.records],
                 cols.name == SA.bindparam('name'))
-        self.rp = self.s().execute(name=fileName)
-        return self.rp.first()
+        return self.s().execute(name=fileName).first()
 
     @transact
     def deleteFileInfo(self, fileName):

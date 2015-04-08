@@ -136,6 +136,7 @@ class ParserRecordKeeper(object):
                 # Not purged and new, so get it
                 yield self.records.pop(key)
 
+
 class ParserConsumer(Base):
     implements(IConsumer)
     
