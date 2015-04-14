@@ -91,13 +91,11 @@ class PreloadConsumer(object):
     def __init__(self, f, **kw):
         self.f = f
         self.kw = kw
-        self.loading = False
     
     def registerProducer(self, producer, streaming):
-        self.loading = True
-        
+        pass
     def unregisterProducer(self):
-        self.loading = False
+        pass
         
     def write(self, row):
         """
@@ -172,7 +170,9 @@ class Transactor(AccessBroker, util.Base):
         )
         self.pendingID = {}
         self.dtk = DTK()
+        self.dtk_pending = None
         self.ipm = IPMatcher()
+        self.ipm_pending = None
 
     def preload(self):
         """
@@ -184,6 +184,9 @@ class Transactor(AccessBroker, util.Base):
         the meantime; doing so will save you more and more time as the
         entries load from the database.
         """
+        def noLongerPending(null, objName):
+            delattr(self, "{}_pending".format(objName))
+        
         def run():
             dList = []
             col = self.entries.c
@@ -196,8 +199,9 @@ class Transactor(AccessBroker, util.Base):
                 s = self.select([getattr(col, colName)], distinct=True)
                 # This deferred will get fired when the query has run
                 dSelectExecuted = defer.Deferred()
-                # Ignore the done-iterating deferred returned from this next call
-                self.selectorator(s, consumer, dSelectExecuted)
+                # When done iterating, remove the pending flag for this object
+                self.selectorator(s, consumer, dSelectExecuted).addCallback(
+                    noLongerPending, objName)
                 dList.append(dSelectExecuted)
             return defer.DeferredList(dList)
         return self.callWhenRunning(run)
@@ -229,10 +233,25 @@ class Transactor(AccessBroker, util.Base):
         if N[0] > N[1]:
             self.msgWarning("Need {:d} values entries, only got {:d}", *N)
             return
-        for kk, name in enumerate(self.colNames):
-            kw[name] = values[kk]
+        for k, name in enumerate(self.colNames):
+            kw[name] = values[k]
         self.entries.insert().execute(**kw)
-    
+
+    @defer.inlineCallbacks
+    def _isEntryAlreadyThere(self, dt):
+        dr = yield self.getEntries(dt)
+        # TODO: Cache hashes of value combinations for recent dt
+        for d in dr:
+            theseValues = yield d
+            if matchingValues(theseValues, values):
+                # Yep, one was found, no new entry will be needed
+                dr.stop()
+                result = True
+                break
+        else:
+            result = False
+        defer.returnValue(result)
+        
     @defer.inlineCallbacks
     def setEntry(self, dt, values):
         """
@@ -240,42 +259,38 @@ class Transactor(AccessBroker, util.Base):
         dt. See my colNames attribute for the six values you need to
         supply.
 
-        Returns a deferred that fires with one of three status values:
-
-        p: Present: Matching dt entry present with identical values,
-           nothing added.
-        a: Added: No matching dt entry found, so one was added.
-        f: Failed to insert for some reason.
+        Returns a deferred that fires with C{True} if a new entry was
+        added, or C{False} if one was already present and no new one
+        was needed.
         """
-        def checkExisting(rowValues):
-            for kk, value in enumerate(rowValues):
-                if value != values[kk]:
-                    return 'c'
-            return 'p'
+        def matchingValues(x, y):
+            for k, value in enumerate(x):
+                if value != y[k]:
+                    return False
+            return True
 
         # Check the lookup tree first
-        pleaseInsert = True
         if self.dtk.check(dt):
-            # There is at least one entry for this dt, so get
-            entries = yield self.getEntries(dt)
-            for row in iter(entries):
-                # ... yes, and also for this k; we won't be inserting
-                # anything for this dt-k combination
-                pleaseInsert = False
-                # But let's check the existing row and return a 'c' if
-                # there's a conflict, or a 'p' if not.
-                code = yield checkExisting(row)
-            # ... no, we must have purget it or it's for a different k.
-        if pleaseInsert:
-            # Insert new entry
-            wasInserted = yield self.insertEntry(dt, k, values)
-            if wasInserted:
-                code = 'a'
-                if kInDTK < k:
-                    self.dtk.set(dt)
+            # There is at least one entry for this dt, so check for an
+            # existing entry with identical values
+            alreadyThere = yield self._isEntryAlreadyThere(dt)
+        else:
+            # No lookup tree entry (yet), so set one
+            self.dtk.set(dt)
+            if hasattr(self, 'dtk_pending'):
+                # The lookup tree is still loading, so we can't be
+                # sure there isn't a DB entry already
+                alreadyThere = yield self._isEntryAlreadyThere(dt)
             else:
-                code = 'f'
-        defer.returnValue(code)
+                # The lookup tree is fully up to date, so its word is
+                # authoritative: There's no matching entry in the DB
+                alreadyThere = False
+        # Will we be inserting a new entry?
+        pleaseInsert = not alreadyThere
+        if pleaseInsert:
+            # Yes, do it now
+            yield self.insertEntry(dt, values)
+        defer.returnValue(pleaseInsert)
     
     @transact
     def setNameValue(self, name, value):
@@ -293,14 +308,6 @@ class Transactor(AccessBroker, util.Base):
             rp = table.insert().execute(value=value)
             ID = rp.lastrowid
         return ID
-
-    @transact
-    def getMaxSequence(self, dt):
-        # Memory leak here? Might produce a lot of those [0] lists I'm seeing.
-        if not self.s('max_sequence'):
-            c = self.entries.c
-            self.s([SA.func.max(c.k)], c.dt == SA.bindparam('dt'))
-        return self.s().execute(dt=dt).first()[0]
 
     def _getID(self, name, value):
         """
@@ -346,74 +353,25 @@ class Transactor(AccessBroker, util.Base):
             self.oops, "Getting ID for '{}' value '{}'", name, value)
         return d
 
-    @defer.inlineCallbacks
-    def setRecord(self, dt, record, isRetry=False):
+    def setRecord(self, dt, record):
         """
         Adds all needed database entries for the supplied record at the
-        specified datetime.
-
-        Returns a deferred that fires with
-
-        TODO: Conform this to the new no-k schema
-        
-        - The index k indicating if there was a conflict with an existing
-          dt-k combination and the new value had to be obtained
-
-        - the old k value if there was the same exact entry (no
-          conflict), or
-
-        - C{False} if the DB operation failed even after a retry.
-
-        A conflict exists when there is already an entry for the
-        specified dt-k combination that matches values than the ones
-        in your supplied record.
+        specified datetime, returning a deferred that fires C{True} if
+        a new entry was added or C{False} if there already was a
+        matching one.
         """
+        def gotIDs(IDs):
+            values.extend(IDs)
+            return self.setEntry(dt, values)
+            
         if not hasattr(self, 'cm'):
             self.cacheSetup()
         # Build list of values and indexed-value IDs
-        dList = []
-        values = [record[x] for x in ('http', 'was_rd', 'ip')]
-        for name in self.indexedValues:
-            dList.append(self._getID(name, record[name]))
-        IDs = yield defer.gatherResults(dList)
-        values.extend(IDs)
-        # Set the entry in its own transaction (which includes
-        # checking for existing ID/value entries)
-        # TODO: Occasionally hangs at this next line!!!
-        success = False
-        code = yield self.setEntry(dt, k, values)
-        if code == 'p':
-            # Entry was already present
-            result = k
-            success = True
-        if code == 'c':
-            # Conflict with existing dt-k combination having different
-            # values; need to get a new sequence number for this entry
-            maxSequence = yield self.getMaxSequence(dt)
-            k = maxSequence + 1
-            code = yield self.setEntry(dt, k, values)
-            if code == 'c':
-                self.msgWarning(
-                    "Couldn't add record for {} even with new " +\
-                    "sequence number {:d}", dt, k)
-            result = k
-        elif code == 'a':
-            # New entry was added
-            result = None
-            success = True
-        if not success:
-            # Must have failed...
-            if isRetry:
-                # ...and this is a retry, so give up
-                result = False
-                self.msgError(
-                    "Failed to set record for <{}> - {:d}:\n{}",
-                    dt, k, record)
-            else:
-                # ...retry once
-                self.msgWarning("Retrying...")
-                result = yield self.setRecord(dt, k, record, isRetry=True)
-        defer.returnValue(result)
+        values = [record[x] for x in self.directValues]
+        dList = [
+            self._getID(name, record[name])
+            for name in self.indexedValues]
+        return defer.gatherResults(dList).addCallback(gotIDs)
 
     @transact
     def getValuesFromIDs(self, IDs):
@@ -430,23 +388,6 @@ class Transactor(AccessBroker, util.Base):
                 result[name] = sh().first()[0]
         return result
         
-    @defer.inlineCallbacks
-    def getRecord(self, dt, k):
-        """
-        NOW BOGUS, AND ONLY USED FOR TESTING-DELETE OR REWRITE
-        
-        Returns a (deferred) dict containing the record for the specified
-        datetime-sequence combination dt-k.
-        """
-        result = {}
-        row = yield self.getEntry(dt, k)
-        row = list(row)
-        for j, name in enumerate(self.directValues):
-            result[name] = row[j]
-        valueDict = yield self.getValuesFromIDs(row[3:])
-        result.update(valueDict)
-        defer.returnValue(result)
-
     @transact
     def purgeIP(self, ip):
         """
