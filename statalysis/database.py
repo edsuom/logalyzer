@@ -7,7 +7,9 @@ LICENSE
 Copyright (C) 2015 Tellectual LLC
 """
 
+from zope.interface import implements
 from twisted.internet import defer
+from twisted.internet.interfaces import IConsumer
 
 from sasync.database import transact, SA, AccessBroker
 
@@ -79,11 +81,35 @@ class DTK(object):
                 self.N += 1
 
 
+class PreloadConsumer(object):
+    """
+    I consume single-item query results, doing the specified f-args-kw
+    for each.
+    """
+    implements(IConsumer)
+
+    def __init__(self, f, **kw):
+        self.f = f
+        self.kw = kw
+        self.loading = False
+    
+    def registerProducer(self, producer, streaming):
+        self.loading = True
+        
+    def unregisterProducer(self):
+        self.loading = False
+        
+    def write(self, row):
+        """
+        All I care about is having rows written, 
+        """
+        self.f(row[0], **kw)
+                
+
 class Transactor(AccessBroker, util.Base):
     """
     I handle transactions for an efficient database of logfile
     entries.
-
     """
     valueLength = 255
     directValues = ['ip', 'http', 'was_rd']
@@ -122,7 +148,7 @@ class Transactor(AccessBroker, util.Base):
             'entries',
             SA.Column('id', SA.SmallInteger,
                       primary_key=True, autoincrement=True),
-            SA.Column('dt', SA.DateTime, nullable=False)
+            SA.Column('dt', SA.DateTime, nullable=False),
             SA.Column('ip', SA.String(15), nullable=False),
             SA.Column('http', SA.SmallInteger, nullable=False),
             SA.Column('was_rd', SA.Boolean, nullable=False),
@@ -148,25 +174,32 @@ class Transactor(AccessBroker, util.Base):
         self.dtk = DTK()
         self.ipm = IPMatcher()
 
-    @defer.inlineCallbacks
     def preload(self):
         """
         Loads my DTK and IPMatcher objects from the database, returning a
-        deferred that fires when loading is done.
+        deferred that fires when the two DB queries are done and loading is
+        underway for both.
 
-        You don't need to wait for the deferred, though. You can
-        consult these objects via I{dtk} and I{ipm} in the meantime;
-        doing so will save you more and more time as the entries load
-        from the database.
+        You can use the DTK and IPMatcher objects via I{dtk} and I{ipm} in
+        the meantime; doing so will save you more and more time as the
+        entries load from the database.
         """
+        dList = []
         col = self.entries.c
-        s = self.select(distinct=True)([col.dt, col.ip])
-        dr = yield self.selectorator(s)
-        for d in dr:
-            row = yield d
-            self.dtk.set(row[0])
-            self.ipm.addIP(row[1], ignoreCache=True)
-
+        for objName, colName, fn, kw in (
+                ('dtk', 'dt', 'set', {}),
+                ('ipm', 'ip', 'addIP', {'ignoreCache':True})):
+            obj = getattr(self, objName)
+            f = getattr(obj, fn)
+            consumer = PreloadConsumer(f, **kw)
+            s = self.select([getattr(col, colName)], distinct=True)
+            # This deferred will get fired when the query has run
+            dSelectExecuted = defer.Deferred()
+            # Ignore the done-iterating deferred returned from this next call
+            self.selectorator(s, consumer, dSelectExecuted)
+            dList.append(dSelectExecuted)
+        return defer.DeferredList(dList)
+    
     @transact
     def getEntries(self, dt):
         """
