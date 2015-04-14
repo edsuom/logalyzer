@@ -184,21 +184,23 @@ class Transactor(AccessBroker, util.Base):
         the meantime; doing so will save you more and more time as the
         entries load from the database.
         """
-        dList = []
-        col = self.entries.c
-        for objName, colName, fn, kw in (
-                ('dtk', 'dt', 'set', {}),
-                ('ipm', 'ip', 'addIP', {'ignoreCache':True})):
-            obj = getattr(self, objName)
-            f = getattr(obj, fn)
-            consumer = PreloadConsumer(f, **kw)
-            s = self.select([getattr(col, colName)], distinct=True)
-            # This deferred will get fired when the query has run
-            dSelectExecuted = defer.Deferred()
-            # Ignore the done-iterating deferred returned from this next call
-            self.selectorator(s, consumer, dSelectExecuted)
-            dList.append(dSelectExecuted)
-        return defer.DeferredList(dList)
+        def run():
+            dList = []
+            col = self.entries.c
+            for objName, colName, fn, kw in (
+                    ('dtk', 'dt', 'set', {}),
+                    ('ipm', 'ip', 'addIP', {'ignoreCache':True})):
+                obj = getattr(self, objName)
+                f = getattr(obj, fn)
+                consumer = PreloadConsumer(f, **kw)
+                s = self.select([getattr(col, colName)], distinct=True)
+                # This deferred will get fired when the query has run
+                dSelectExecuted = defer.Deferred()
+                # Ignore the done-iterating deferred returned from this next call
+                self.selectorator(s, consumer, dSelectExecuted)
+                dList.append(dSelectExecuted)
+            return defer.DeferredList(dList)
+        return self.callWhenRunning(run)
     
     @transact
     def getEntries(self, dt):
