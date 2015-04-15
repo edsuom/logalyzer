@@ -65,6 +65,9 @@ class IPMatcher(MatcherBase):
         # Cache for misses
         self.cm.new(20)
 
+    def __len__(self):
+        return len(self.ipHashes)
+        
     def dqToHash(self, ip):
         """
         Fast dotted-quad to guaranteed-unique long int hash, adapted from

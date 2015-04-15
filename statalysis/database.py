@@ -188,39 +188,34 @@ class Transactor(AccessBroker, util.Base):
         self.pendingID = {}
         self.dtk = DTK()
         self.dtk_pending = None
-        self.ipm = IPMatcher()
-        self.ipm_pending = None
 
     def preload(self):
         """
         Loads my DTK and IPMatcher objects from the database, returning a
-        deferred that fires when the two DB queries are done and loading is
-        underway for both.
+        deferred that fires with the IPMatcher object when it is loaded.
 
-        You can use the DTK and IPMatcher objects via I{dtk} and I{ipm} in
-        the meantime; doing so will save you more and more time as the
-        entries load from the database.
+        You can use the DTK object via I{dtk} in the meantime; doing
+        so will save you more and more time as the entries load from
+        the database.
         """
-        def noLongerPending(null, objName):
-            delattr(self, "{}_pending".format(objName))
+        def load(colName, f, **kw):
+            consumer = PreloadConsumer(f, **kw)
+            s = self.select([getattr(col, colName)], distinct=True)
+            return self.selectorator(s, consumer)
         
         def run():
-            dList = []
             col = self.entries.c
-            for objName, colName, fn, kw in (
-                    ('dtk', 'dt', 'set', {}),
-                    ('ipm', 'ip', 'addIP', {'ignoreCache':True})):
-                obj = getattr(self, objName)
-                f = getattr(obj, fn)
-                consumer = PreloadConsumer(f, **kw)
-                s = self.select([getattr(col, colName)], distinct=True)
-                # This deferred will get fired when the query has run
-                dSelectExecuted = defer.Deferred()
-                # When done iterating, remove the pending flag for this object
-                self.selectorator(s, consumer, dSelectExecuted).addCallback(
-                    noLongerPending, objName)
-                dList.append(dSelectExecuted)
-            return defer.DeferredList(dList)
+            # IP matcher
+            dIPM = load('ip', ipm.addIP, ignoreCache=True)
+            dIPM.addCallback(lambda _: ipm)
+            # DTK
+            dDTK = load('dt', self.dtk.set)
+            dDTK.addCallback(lambda _: delattr(self, "dtk_pending"))
+            # The caller only needs to wait for loading of the IP
+            # matcher, not the DTK object
+            return dIPM
+
+        ipm = IPMatcher()
         return self.callWhenRunning(run)
     
     @transact
@@ -414,7 +409,7 @@ class Transactor(AccessBroker, util.Base):
             cols = getattr(getattr(self, name), 'c')
             with self.selex(cols.value) as sh:
                 sh.where(cols.id == ID)
-            rp = sh()
+                rp = sh()
             result[name] = rp.first()[0]
         return result
 

@@ -177,18 +177,19 @@ class MasterRecordKeeper(Base):
     """
     def __init__(self, dbURL, warnings=False, echo=False, gui=None):
         self.ipList = []
-        self.ipp = IPMatcher()
-        self.trans = database.Transactor(dbURL, echo=echo)
+        self.t = database.Transactor(dbURL, verbose=echo, echo=echo)
         self.verbose = warnings
         self.gui = gui
 
     def startup(self):
-        def done(result):
-            self.dtk, self.ipm = result
-        return self.trans.preload().addCallbacks(done, self.oops)
+        def done(ipm):
+            self.ipm = ipm
+            self.msgBody("{:d} IP addresses", len(ipm), ID=ID)
+        ID = self.msgHeading("Preloading IP Matcher from DB")
+        return self.t.preload().addCallbacks(done, self.oops)
         
     def shutdown(self):
-        return self.trans.shutdown()
+        return self.t.shutdown()
 
     def len(self, records):
         N = 0
@@ -234,7 +235,7 @@ class MasterRecordKeeper(Base):
         # transaction is very low priority because our IP matcher
         # was just updated
         ID = self.msgHeading("Purging IP address {}", ip)
-        return self.trans.purgeIP(
+        return self.t.purgeIP(
             ip, niceness=10).addCallbacks(donePurging, self.oops)
 
     def addRecord(self, dt, record):
@@ -260,7 +261,7 @@ class MasterRecordKeeper(Base):
             return 0
 
         self.ipm.addIP(record['ip'])
-        return self.trans.setRecord(
+        return self.t.setRecord(
             dt, k, record).addCallbacks(done, self.oops)
 
     @defer.inlineCallbacks
