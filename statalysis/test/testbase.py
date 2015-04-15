@@ -339,7 +339,13 @@ RECORDS = {
         {'vhost': "bar.com",
          'ip': ip2, 'http': 404, 'was_rd': False,
          'url': "/", 'ref': "-", 'ua': "-"}],
-    }
+}
+
+VALUES = (
+    [ip1, 200, False, 1, 1, 1, 1],
+    [ip1, 200, False, 1, 2, 1, 1],
+    [ip2, 200, False, 1, 1, 2, 1],
+)
 
 months = ["2", "2", "3"]
 vhosts = ["foo.com", "foo.com", "bar.com"]
@@ -487,6 +493,26 @@ class TestHandler(MsgBase, logging.StreamHandler):
         if self.verbose:
             return logging.StreamHandler.emit(self, record)
 
+
+class MockDTK(MsgBase):
+    def __init__(self, verbose):
+        self.verbose = verbose
+        self.dtList = []
+        self.callsMade = []
+
+    def noteCall(self, name, dt):
+        self.msg("DTK: {}({})", name, dt)
+        self.callsMade.append([name, dt])
+    
+    def check(self, dt):
+        self.noteCall('check', dt)
+        return dt in self.dtList
+
+    def set(self, dt):
+        self.noteCall('set', dt)
+        if dt not in self.dtList:
+            self.dtList.append(dt)
+        
 
 class MockWorker(MsgBase):
     implements(IWorker)

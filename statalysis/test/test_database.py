@@ -14,15 +14,17 @@ from twisted.internet import defer
 from twisted.python import failure
 
 from testbase import *
-
 import database
 
 
-ROWS = [(dt1, 0), (dt1, 1), (dt2, 0)]
+VERBOSE = True
+
+DB_URL = 'mysql://test@localhost/test'
+#DB_URL = 'sqlite://'
 
 
-def makeEntry(http, was_rd, ip, *ids):
-    result = [http, was_rd, ip]
+def makeEntry(id, http, was_rd, *ids):
+    result = [id, http, was_rd]
     for thisID in ids:
         result.append(thisID)
     for k in xrange(4-len(ids)):
@@ -31,8 +33,10 @@ def makeEntry(http, was_rd, ip, *ids):
 
 
 class TestDTK(TestCase):
+    rows = [(dt1,), (dt1,), (dt2,)]
+
     def test_init(self):
-        dtk = database.DTK(ROWS)
+        dtk = database.DTK(self.rows)
         self.assertEqual(len(dtk), 2)
         self.assertEqual(
             dtk.x,
@@ -44,7 +48,7 @@ class TestDTK(TestCase):
     def test_check(self):
         dtk = database.DTK()
         self.assertFalse(dtk.check(dt1))
-        dtk.load(ROWS)
+        dtk.load(self.rows)
         self.assertTrue(dtk.check(dt1))
         self.assertTrue(dtk.check(dt2))
         self.assertFalse(dtk.check(dt3))
@@ -61,13 +65,24 @@ class TestDTK(TestCase):
         
 
 class TestTransactor(TestCase):
-    def setUp(self):
-        # In-memory database
-        self.t = database.Transactor("sqlite://")#, echo=True)
-        return self.t.preload()
+    verbose = True
+    spew = False
     
+    def setUp(self):
+        self.handler = TestHandler(self.isVerbose())
+        logging.getLogger('asynqueue').addHandler(self.handler)
+        self.t = database.Transactor(
+            DB_URL, verbose=self.isVerbose(), spew=self.spew)
+        return self.t.waitUntilRunning()
+        
+    @defer.inlineCallbacks
     def tearDown(self):
-        return self.t.shutdown()
+        if getattr(getattr(self, 't', None), 'running', False):
+            tableNames = ['entries', 'files'] + self.t.indexedValues
+            for tableName in tableNames:
+                if hasattr(self.t, tableName):
+                    yield self.t.sql("DROP TABLE {}".format(tableName))
+            yield self.t.shutdown()
 
     def test_pendingID(self):
         pe = self.t._pendingID
@@ -85,28 +100,58 @@ class TestTransactor(TestCase):
                     self.assertNotEqual(pe(name, values[k-1]), d)
                 pe(name, value, clear=True)
                 self.assertEqual(pe(name, value), None)
-    
+
+    @defer.inlineCallbacks
+    def test_matchingEntry(self):
+        values = makeEntry(ip1, 200, False)
+        # Should be none there yet
+        ID = yield self.t.matchingEntry(dt1, values)
+        self.assertNone(ID)
+        ID1 = yield self.t.setEntry(dt1, values)
+        # Now there should be
+        ID = yield self.t.matchingEntry(dt1, values)
+        self.assertEqual(ID, ID1)
+        # A different dt doesn't match
+        ID = yield self.t.matchingEntry(dt2, values)
+        self.assertNone(ID)
+        # Any difference in values makes the match fail
+        for k in xrange(3,7):
+            newValues = copy(values)
+            newValues[k] = 2
+            ID = yield self.t.matchingEntry(dt1, newValues)
+            self.assertNone(ID)
+                
     @defer.inlineCallbacks
     def test_setEntry(self):
-        values = makeEntry(200, False, ip1)
-        # Add new entry for first k
-        code = yield self.t.setEntry(dt1, 0, values)
-        self.assertEqual(code, 'a')
-        # Add new entry for second k
-        code = yield self.t.setEntry(dt1, 1, values)
-        self.assertEqual(code, 'a')
-        # Set duplicate entry for first k
-        code = yield self.t.setEntry(dt1, 1, values)
-        self.assertEqual(code, 'p')
-        # Confirm conflict with changed entry having same dt-k
-        values[0] = 404
-        code = yield self.t.setEntry(dt1, 1, values)
-        self.assertEqual(code, 'c')
-        # But still no problem with original entry
-        values[0] = 200
-        code = yield self.t.setEntry(dt1, 1, values)
-        self.assertEqual(code, 'p')
+        # Test setup
+        self.t.dtk = MockDTK(self.verbose)
+        cm = self.t.dtk.callsMade
+        values = makeEntry(ip1, 200, False)
 
+        # New entry
+        ID1 = yield self.t.setEntry(dt1, values)
+        # Must be an integer ID
+        self.assertIsInstance(ID1, (int, long))
+        # DTK was checked and set
+        self.assertEqual(cm, [['check', dt1], ['set', dt1]])
+                         
+        # Duplicate entry
+        ID2 = yield self.t.setEntry(dt1, values)
+        # Same as the other one
+        self.assertEqual(ID2, ID1)
+        # DTK was checked
+        self.assertEqual(len(cm), 3)
+        self.assertEqual(cm[-1], ['check', dt1])
+
+        # New entry: different dt, same values
+        ID3 = yield self.t.setEntry(dt2, values)
+        # New ID
+        self.assertIsInstance(ID3, (int, long))
+        self.assertNotEqual(ID3, ID1)
+        # DTK was checked and set
+        self.assertEqual(len(cm), 5)
+        self.assertEqual(cm[-2:], [['check', dt2], ['set', dt2]])
+        
     @defer.inlineCallbacks
     def test_setNameValue(self):
         someValues = ("/", "foo", "bar-whatever", "/wasting-time forever")
@@ -123,13 +168,8 @@ class TestTransactor(TestCase):
     @defer.inlineCallbacks
     def test_getID(self):
         def nowRun(null, name, value):
-            d = self.t._getID(name, value)
-            d.addCallback(gotID, value)
-            return d
-
-        def gotID(ID, value):
-            IDLists[value].append(ID)
-
+            return self.t._getID(name, value).addCallback(
+                lambda ID: IDLists[value].append(ID))
         N = 4
         self.t.cacheSetup()
         someValues = ("foo", "bar-whatever", "/wasting-time forever")
@@ -139,8 +179,8 @@ class TestTransactor(TestCase):
             for value in someValues:
                 IDLists[value] = []
                 for k in xrange(N):
-                    randomDelay = random.randrange(0, 2)
-                    d = self.t.deferToDelay(randomDelay)
+                    randomDelay = 0.5*random.random()
+                    d = deferToDelay(randomDelay)
                     d.addCallback(nowRun, name, value)
                     dList.append(d)
             yield defer.DeferredList(dList)
@@ -148,46 +188,66 @@ class TestTransactor(TestCase):
                 IDList = IDLists[value]
                 self.assertEqual(len(IDList), N)
                 self.assertEqual(min(IDList), max(IDList))
+
+    def _writeIndexedValues(self, record):
+        dList = []
+        for name in self.t.indexedValues:
+            dList.append(self.t.setNameValue(name, record[name]))
+        return defer.gatherResults(dList)
+    
+    @defer.inlineCallbacks                
+    def test_getValuesFromIDs(self):
+        record = RECORDS[dt1][0]
+        IDs = yield self._writeIndexedValues(record)
+        valueDict = yield self.t._getValuesFromIDs(IDs)
+        for name, value in valueDict.iteritems():
+            self.assertEqual(value, record[name])
+
+    @defer.inlineCallbacks                
+    def writeAllRecords(self):
+        for dt, records in RECORDS.iteritems():
+            for record in records:
+                values = [record[x] for x in self.t.directValues]
+                IDs = yield self._writeIndexedValues(record)
+                values.extend(IDs)
+                yield self.t.insertEntry(dt, values)
+            
+    @defer.inlineCallbacks                
+    def test_getRecords(self):
+        def checkValues(x, y):
+            names = self.t.directValues + self.t.indexedValues
+            for name in names:
+                self.assertIn(name, x)
+                self.assertEqual(x[name], y[name])
         
+        # Write all records
+        yield self.writeAllRecords()
+        # Call, repeatedly
+        for kk in xrange(5):
+            records = yield self.t.getRecords(dt1)
+            for k, record in enumerate(records):
+                checkValues(record, RECORDS[dt1][k])
+                
     @defer.inlineCallbacks
     def test_setRecord(self):
         firstRecord = RECORDS[dt1][0]
         # Set once and check what we get is what we set
-        result = yield self.t.setRecord(dt1, 0, firstRecord)
-        self.assertEqual(result, None)
-        record = yield self.t.getRecord(dt1, 0)
-        self.assertEqual(record, firstRecord)
-        # Set again with slight difference to confirm caching doesn't
-        # raise error
+        ID1 = yield self.t.setRecord(dt1, firstRecord)
+        self.assertIsInstance(ID1, (int, long))
+        records = yield self.t.getRecords(dt1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0], firstRecord)
+        # Set again with slight difference
         modRecord = firstRecord.copy()
         modRecord['ua'] = "Foo Browser/1.2"
-        result = yield self.t.setRecord(dt1, 2, modRecord)
-        self.assertEqual(result, None)
-        record = yield self.t.getRecord(dt1, 2)
-        self.assertEqual(record, modRecord)
+        ID2 = yield self.t.setRecord(dt1, modRecord)
+        self.assertIsInstance(ID2, (int, long))
+        self.assertNotEqual(ID2, ID1)
+        records = yield self.t.getRecords(dt1)
+        self.assertEqual(len(records), 2)
+        self.assertIn(firstRecord, records)
+        self.assertIn(modRecord, records)
     
-    @defer.inlineCallbacks
-    def writeAllRecords(self):
-        for dt, theseRecords in RECORDS.iteritems():
-            for k, thisRecord in enumerate(theseRecords):
-                result = yield self.t.setRecord(dt, k, thisRecord)
-                self.assertEqual(result, None)
-
-    def test_writeMultipleRecords(self):
-        return self.writeAllRecords()
-
-    @defer.inlineCallbacks
-    def test_writesConflictingRecord(self):
-        yield self.writeAllRecords()
-        cRecord = copy(RECORDS[dt1][0])
-        # Repeat of same record yields same sequence
-        result = yield self.t.setRecord(dt1, 0, cRecord)
-        self.assertEqual(result, 0)
-        # Change URL and get new sequence
-        cRecord['url'] = "/bogus.html"
-        result = yield self.t.setRecord(dt1, 0, cRecord)
-        self.assertEqual(result, 2)
-
     @defer.inlineCallbacks
     def test_purgeIP(self):
         yield self.writeAllRecords()

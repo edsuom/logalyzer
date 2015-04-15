@@ -30,11 +30,10 @@ def rc(*parts):
     return re.compile(rexp)
 
 
-class ProcessError(Exception):
-    pass
-
-class DeferredException(Exception):
-    pass
+class DatabaseError(Exception):
+    """
+    Incompatible database.
+    """
 
 
 class CacheManager(object):

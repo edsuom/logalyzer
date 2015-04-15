@@ -11,6 +11,9 @@ from zope.interface import implements
 from twisted.internet import defer
 from twisted.internet.interfaces import IConsumer
 
+from asynqueue.info import showResult, whichThread
+from asynqueue.iteration import ListConsumer
+
 from sasync.database import transact, SA, AccessBroker
 
 import util
@@ -99,10 +102,25 @@ class PreloadConsumer(object):
         
     def write(self, row):
         """
-        All I care about is having rows written, 
+        All I care about is having rows written
         """
         self.f(row[0], **kw)
-                
+
+
+class RecordConsumer(ListConsumer):
+    """
+    I consume rows and make them into records.
+    """
+    @defer.inlineCallbacks
+    def processItem(self, row):
+        ID = row[0]
+        result = {}
+        for j, name in enumerate(self.t.directValues):
+            result[name] = row[j+1]
+        valueDict = yield self.t._getValuesFromIDs(row[4:])
+        result.update(valueDict)
+        defer.returnValue((ID, result))
+
 
 class Transactor(AccessBroker, util.Base):
     """
@@ -144,14 +162,13 @@ class Transactor(AccessBroker, util.Base):
         # single second.
         yield self.table(
             'entries',
-            SA.Column('id', SA.SmallInteger,
-                      primary_key=True, autoincrement=True),
-            SA.Column('dt', SA.DateTime, nullable=False),
-            SA.Column('ip', SA.String(15), nullable=False),
-            SA.Column('http', SA.SmallInteger, nullable=False),
-            SA.Column('was_rd', SA.Boolean, nullable=False),
-            SA.Column('id_vhost', SA.Integer, nullable=False),
-            SA.Column('id_url', SA.Integer, nullable=False),
+            SA.Column('id', SA.Integer, primary_key=True),
+            SA.Column('dt', SA.DateTime),
+            SA.Column('ip', SA.String(15)),
+            SA.Column('http', SA.SmallInteger),
+            SA.Column('was_rd', SA.Boolean),
+            SA.Column('id_vhost', SA.Integer),
+            SA.Column('id_url', SA.Integer),
             SA.Column('id_ref', SA.Integer),
             SA.Column('id_ua', SA.Integer),
         )
@@ -209,12 +226,13 @@ class Transactor(AccessBroker, util.Base):
     @transact
     def getEntries(self, dt):
         """
-        Returns all of the columns after dt for one datetime second of
-        entries.
+        Returns the ID plus all of the columns after dt for one datetime
+        second of entries.
         """
         col = self.entries.c
         if not self.s('s_entry'):
-            cList = [getattr(col, x) for x in self.colNames]
+            cList = ['id']
+            cList += [getattr(col, x) for x in self.colNames]
             self.s(cList, col.dt == SA.bindparam('dt'))
         return self.s().execute(dt=dt)
 
@@ -222,11 +240,12 @@ class Transactor(AccessBroker, util.Base):
     def insertEntry(self, dt, values):
         """
         Inserts a DB entry for the specified datetime, using the supplied
-        dict values.
+        dict of values, which are index integers for indexed values.
 
         You must ensure that there is one value for each name
         defined in I{colNames}.
-        
+
+        Returns a unique integer ID for the new entry.
         """
         kw = {'dt': dt}
         N = [len(x) for x in (self.colNames, values)]
@@ -235,22 +254,35 @@ class Transactor(AccessBroker, util.Base):
             return
         for k, name in enumerate(self.colNames):
             kw[name] = values[k]
-        self.entries.insert().execute(**kw)
+        rp = self.entries.insert().execute(**kw)
+        return rp.lastrowid
 
     @defer.inlineCallbacks
-    def _isEntryAlreadyThere(self, dt):
+    def matchingEntry(self, dt, values):
+        """
+        Returns a deferred that fires with the integer ID of the DB entry
+        for the specified datetime and list of values (in the order of
+        the I{colNames} list, some values being integer indices), or
+        C{None} if there is no such entry.
+        """
+        def matchingValues():
+            ID = theseValues[0]
+            for k, value in enumerate(theseValues[1:]):
+                if value != values[k]:
+                    return
+            return ID
+
+        ID = None
         dr = yield self.getEntries(dt)
         # TODO: Cache hashes of value combinations for recent dt
         for d in dr:
             theseValues = yield d
-            if matchingValues(theseValues, values):
-                # Yep, one was found, no new entry will be needed
-                dr.stop()
-                result = True
-                break
-        else:
-            result = False
-        defer.returnValue(result)
+            ID = matchingValues()
+            if ID is None:
+                continue
+            # Yep, one was found, no new entry will be needed
+            dr.stop()
+        defer.returnValue(ID)
         
     @defer.inlineCallbacks
     def setEntry(self, dt, values):
@@ -259,38 +291,32 @@ class Transactor(AccessBroker, util.Base):
         dt. See my colNames attribute for the six values you need to
         supply.
 
-        Returns a deferred that fires with C{True} if a new entry was
-        added, or C{False} if one was already present and no new one
-        was needed.
+        Returns a deferred that fires with the integer ID of a new
+        entry if one was added, or the ID of an existing one if
+        already present and no new one was needed. Callers don't need
+        to know which.
         """
-        def matchingValues(x, y):
-            for k, value in enumerate(x):
-                if value != y[k]:
-                    return False
-            return True
-
         # Check the lookup tree first
         if self.dtk.check(dt):
             # There is at least one entry for this dt, so check for an
             # existing entry with identical values
-            alreadyThere = yield self._isEntryAlreadyThere(dt)
+            ID = yield self.matchingEntry(dt, values)
         else:
             # No lookup tree entry (yet), so set one
             self.dtk.set(dt)
             if hasattr(self, 'dtk_pending'):
                 # The lookup tree is still loading, so we can't be
                 # sure there isn't a DB entry already
-                alreadyThere = yield self._isEntryAlreadyThere(dt)
+                ID = yield self.matchingEntry(dt, values)
             else:
                 # The lookup tree is fully up to date, so its word is
                 # authoritative: There's no matching entry in the DB
-                alreadyThere = False
+                ID = None
         # Will we be inserting a new entry?
-        pleaseInsert = not alreadyThere
-        if pleaseInsert:
+        if ID is None:
             # Yes, do it now
-            yield self.insertEntry(dt, values)
-        defer.returnValue(pleaseInsert)
+            ID = yield self.insertEntry(dt, values)
+        defer.returnValue(ID)
     
     @transact
     def setNameValue(self, name, value):
@@ -356,9 +382,12 @@ class Transactor(AccessBroker, util.Base):
     def setRecord(self, dt, record):
         """
         Adds all needed database entries for the supplied record at the
-        specified datetime, returning a deferred that fires C{True} if
-        a new entry was added or C{False} if there already was a
-        matching one.
+        specified datetime.
+
+        Returns a deferred that fires with the integer ID of a new
+        entry if one was added, or the ID of an existing one if
+        already present and no new one was needed. Callers don't need
+        to know which.
         """
         def gotIDs(IDs):
             values.extend(IDs)
@@ -374,7 +403,7 @@ class Transactor(AccessBroker, util.Base):
         return defer.gatherResults(dList).addCallback(gotIDs)
 
     @transact
-    def getValuesFromIDs(self, IDs):
+    def _getValuesFromIDs(self, IDs):
         """
         Call with a list of IDs, one for each of my I{indexedValues}, and
         returns a dict with the name:value items.
@@ -385,8 +414,31 @@ class Transactor(AccessBroker, util.Base):
             cols = getattr(getattr(self, name), 'c')
             with self.selex(cols.value) as sh:
                 sh.where(cols.id == ID)
-                result[name] = sh().first()[0]
+            rp = sh()
+            result[name] = rp.first()[0]
         return result
+
+    def getRecords(self, dt):
+        """
+        Returns a (deferred) list of all the records for the specified
+        datetime, in the order they were originally written.
+
+        Note: This method requires DB connection pooling.
+        """
+        def done(null):
+            return lc().addCallback(gotList)
+        def gotList(recordList):
+            return [xy[1] for xy in sorted(recordList, key=lambda xy: xy[0])]
+        if self.singleton:
+            raise util.DatabaseError(
+                "Database must support connection pooling")
+        lc = RecordConsumer(t=self)
+        # I got into trouble ignoring the deferred returned from the
+        # transaction that fires when all iterations are done. Calling
+        # this after setRecord doesn't work unless I wait for the
+        # iterations-done deferred and ALSO (then?) call the
+        # ListConsumer. Weird.
+        return self.getEntries(dt, consumer=lc).addCallback(done)
         
     @transact
     def purgeIP(self, ip):
