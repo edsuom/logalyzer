@@ -19,10 +19,22 @@ from twisted.internet.interfaces import IConsumer
 import asynqueue
 
 import parse
-from util import *
+from util import Base
 
 
-class ProcessReader(object):
+class KWParse:
+    """
+    Subclass me, define a list of name-default keyword options via the
+    'keyWords' class attribute, and call this method in your
+    constructor.
+    """
+    def parseKW(self, kw):
+        for name, default in self.keyWords:
+            value = kw.get(name, default)
+            setattr(self, name, value)
+
+
+class ProcessReader(KWParse):
     """
     Subordinate Python processes use their own instances of me to read
     logfiles.
@@ -31,11 +43,11 @@ class ProcessReader(object):
         r'(\.(jpg|jpeg|png|gif|css|ico|woff|ttf|svg|eot\??))' +\
         r'|(robots\.txt|sitemap\.xml|googlecea.+\.html)$')
 
+    keyWords = (
+        ('vhost', None), ('exclude', []), ('ignoreSecondary', False))
+
     def __init__(self, matchers, **kw):
-        for name, default in (
-                ('vhost', None), ('exclude', []), ('ignoreSecondary', False)):
-            value = kw.get(name, default)
-            setattr(name, value)
+        self.parseKW(kw)
         self.p = parse.LineParser()
         self.m = parse.MatcherManager(matchers)
         self.rc = parse.RedirectChecker()
@@ -158,23 +170,28 @@ class ProcessReader(object):
                     yield stuff
 
     
-class Reader(Base):
+class Reader(KWParse, Base):
     """
     I read and parse web server log files
     """
     timeout = 60*10 # Ten minutes per file
+
+    keyWords = (
+        ('cores', None),
+        ('vhost', None), ('exclude', []), ('ignoreSecondary', False),
+        ('verbose', False), ('info', False), ('warnings', False),
+        ('gui', None))
     
-    def __init__(
-            self, logFiles, dbURL, cores=None,
-            verbose=False, info=False, warnings=False, gui=None):
-        #----------------------------------------------------------------------
+    def __init__(self, logFiles, dbURL, **kw):
+        self.parseKW(kw)
         self.fileNames = logFiles
         from records import RecordKeeper
-        self.rk = RecordKeeper(dbURL, verbose=info, echo=echo, gui=gui)
-        self.cores = cores
-        self.info = info
-        self.verbose = verbose
-        self.gui = gui
+        self.rk = RecordKeeper(
+            dbURL, verbose=verbose, info=info, echo=echo, gui=gui)
+        self.pr = ProcessReader(
+            self.getMatchers(rules),
+            vhost=self.vhost, exclude=self.exclude,
+            ignoreSecondary=self.ignoreSecondary)
         self.isRunning = False
 
     def getMatchers(self, rules):
@@ -210,7 +227,7 @@ class Reader(Base):
         if self.linger():
             yield self.deferToDelay(10)
             
-    def run(self, rules, vhost=None, exclude=[], ignoreSecondary=False):
+    def run(self, rules):
         """
         Runs everything via the process queue (multiprocessing!),
         returning a reference to a list of all IP addresses purged
@@ -320,9 +337,6 @@ class Reader(Base):
 
         self.isRunning = True
         filesLeft = copy(self.fileNames)
-        parser = Parser(
-            self.getMatchers(rules),
-            vhost, exclude, ignoreSecondary, verbose=self.info)
         self.pq = self.getQueue()
         # The files are all dispatched at once
         for fileName in self.fileNames:

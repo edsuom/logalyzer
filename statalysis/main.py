@@ -118,6 +118,7 @@ Copyright (C) 2015 Tellectual LLC
 from twisted.internet import reactor
 
 from util import Base
+from writer import IPWriter
 import logread, gui
 
 
@@ -238,6 +239,9 @@ class Recorder(Base):
         return logread.Reader(
             self.logFiles, dbURL,
             cores=self.opt['cores'],
+            vhost=self.opt['vhost'],
+            exclude=self.csvTextToList(self.opt['e'], int),
+            ignoreSecondary=self.opt['y']),
             verbose=self.verbose, info=self.opt['info'],
             warnings=self.opt['w'], gui=self.gui)
 
@@ -248,7 +252,8 @@ class Recorder(Base):
         # Save the IP addresses from purges if that option set
         filePath = self.opt['s']
         if filePath:
-            self.w.writeIPs(ipList, filePath)
+            w = IPWriter()
+            w.writeIPs(ipList, filePath)
         return self.reader.done()
         
     def load(self):
@@ -262,11 +267,9 @@ class Recorder(Base):
             else:
                 reactor.stop()
 
-        d = self.reader.run(
-            self.loadRules(),
-            vhost=self.opt['vhost'],
-            exclude=self.csvTextToList(self.opt['e'], int),
-            ignoreSecondary=self.opt['y'])
+        rules = self.loadRules()
+        # Almost all of my time is spent in this next line
+        d = self.reader.run(rules)
         d.addCallbacks(self._doneReading, self.oops)
         d.addCallbacks(allDone, self.oops)
         return d
@@ -280,7 +283,8 @@ class Recorder(Base):
         rr = RuleReader()
         for filePath in self.opt:
             ipList.extend(rr.lines(filePath))
-        self.w.writeIPs(ipList, outPath)
+        w = IPWriter()
+        w.writeIPs(ipList, outPath)
     
     def run(self):
         if self.opt['c']:

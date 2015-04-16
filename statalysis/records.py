@@ -53,7 +53,7 @@ class ProcessConsumer(Base):
         if isinstance(x, str):
             # No need to pause producer for a mere IP address
             self.rk.purgeIP(x)
-            self.msg("Bad IP: {}", x)
+            self.msg("Misbehaving IP: {}", x)
         else:
             # Writing records can take long enough to pause the
             # producer until it's done. That keeps my DB transaction
@@ -80,12 +80,13 @@ class RecordKeeper(Base):
     I{ipm} attributes to avoid database activity.
 
     """
-    def __init__(self, dbURL, verbose=False, echo=False, gui=None):
+    def __init__(self, dbURL, verbose=False, info=False, echo=False, gui=None):
         # List of IP addresses purged during this session
         self.ipList = []
         self.dt = DeferredTracker()
         self.t = database.Transactor(dbURL, verbose=echo, echo=echo)
         self.verbose = verbose
+        self.info = info
         self.gui = gui
 
     def startup(self):
@@ -168,12 +169,18 @@ class RecordKeeper(Base):
         """
         ID = self.msgHeading(
             "Adding {:d} records for '{}'", N_records, fileName)
-        return ProcessConsumer(self, fileName, ID, self.verbose)
+        return ProcessConsumer(self, fileName, msgID=ID, verbose=self.info)
     
-    def getIPs(self):
+    def getNewIPs(self):
         """
-        Returns a list of purged IP addresses
+        Returns a list of purged IP addresses that have been added since
+        the last time this method was called.
+
         """
-        return self.ipList
+        if not hasattr(self, 'ipList_index'):
+            self.ipList_index = 0
+        result = self.ipList[self.ipList_index:]
+        self.ipList_index = len(self.ipList) - 1
+        return result
 
 
