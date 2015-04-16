@@ -67,7 +67,7 @@ class MatcherManager(object):
         ('botMatcher', 'BotMatcher'),
         ('refMatcher', 'RefMatcher'))
 
-    def __init__(self, matchers)
+    def __init__(self, matchers):
         for callableName, matcherName in self.matcherTable:
             f = matchers.get(matcherName, self.alwaysFalse)
             setattr(self, callableName, f)

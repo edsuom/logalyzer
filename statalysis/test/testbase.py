@@ -30,7 +30,7 @@ from twisted.python.failure import Failure
 from twisted.internet.interfaces import IConsumer
 from twisted.trial import unittest
 
-from asynqueue import TaskQueue
+from asynqueue import info, TaskQueue
 from asynqueue.interfaces import IWorker
 
 
@@ -610,10 +610,10 @@ class TestCase(MsgBase, unittest.TestCase):
     timeout = 10
     
     def oops(self, failureObj, *metaArgs):
-        with self.verboseContext():
+        if self.isVerbose():
             if not metaArgs:
                 metaArgs = (repr(self),)
-            text = info.Info.setCall(*metaArgs).aboutFailure(failureObj)
+            text = info.Info().setCall(*metaArgs).aboutFailure(failureObj)
             self.msg(text)
         return failureObj
     

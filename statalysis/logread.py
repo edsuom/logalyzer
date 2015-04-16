@@ -18,7 +18,7 @@ from twisted.internet.interfaces import IConsumer
 
 import asynqueue
 
-import parse
+import sift, parse
 from util import Base
 
 
@@ -174,20 +174,20 @@ class Reader(KWParse, Base):
     """
     I read and parse web server log files
     """
-    timeout = 60*10 # Ten minutes per file
-
     keyWords = (
         ('cores', None),
         ('vhost', None), ('exclude', []), ('ignoreSecondary', False),
         ('verbose', False), ('info', False), ('warnings', False),
         ('gui', None))
     
-    def __init__(self, logFiles, dbURL, **kw):
+    def __init__(self, logFiles, rules, dbURL, **kw):
         self.parseKW(kw)
         self.fileNames = logFiles
         from records import RecordKeeper
         self.rk = RecordKeeper(
-            dbURL, verbose=verbose, info=info, echo=echo, gui=gui)
+            dbURL,
+            verbose=self.verbose, info=self.info, echo=self.warnings,
+            gui=self.gui)
         self.pr = ProcessReader(
             self.getMatchers(rules),
             vhost=self.vhost, exclude=self.exclude,
@@ -208,7 +208,7 @@ class Reader(KWParse, Base):
             cores = asynqueue.ProcessQueue.cores()
         else:
             cores = int(self.cores)
-        return ProcessQueue(cores)
+        return asynqueue.ProcessQueue(cores)
     
     @defer.inlineCallbacks
     def done(self):
@@ -216,7 +216,7 @@ class Reader(KWParse, Base):
         Call this to shut everything down.
         """
         if self.isRunning:
-            self.dShutdown = defer.Deferred
+            self.dShutdown = defer.Deferred()
             yield self.dShutdown
         self.isRunning = False
         self.msgHeading("Shutting down reader...")
@@ -227,68 +227,31 @@ class Reader(KWParse, Base):
         if self.linger():
             yield self.deferToDelay(10)
             
-    def run(self, rules):
+    def run(self):
         """
         Runs everything via the process queue (multiprocessing!),
         returning a reference to a list of all IP addresses purged
         during the run.
         """
-        def gotSomeResults(result, fileName, dtFile):
-            # DEBUG memory leak
-            # -------------------------------
-            self.N_iter += 1
-            h1 = hp.heap()
-            print h1
-            print h1.byrcs
-            objgraph.show_growth(limit=10)
-            if self.N_iter > 20:
-                import pdb
-                pdb.set_trace()
-            # -------------------------------
-            # The records are never getting freed from memory
-            # It seems like each "thisRecord" is getting stored somewhere
-
-            # (Pdb) h1[0].referents[0].byvia
-            # Partition of a set of 56174 objects. Total size = 5505272 bytes.
-            #  Index  Count   %     Size   % Cumulative  % Referred Via:
-            #      0  13720  24  2011976  37   2011976  37 "['ua']"
-            #      1   6862  12  1434064  26   3446040  63 "['ref']"
-            #      2  12667  23   796272  14   4242312  77 "['vhost']"
-            #      3  14062  25   778960  14   5021272  91 "['ip']"
-            #      4   8621  15   473112   9   5494384 100 "['url']"
-            #      5     24   0     1176   0   5495560 100 '.keys()[0]'
-            #      6     24   0     1008   0   5496568 100 '.keys()[1]'
-            #      7     21   0     1008   0   5497576 100 '.keys()[3]'
-            #      8     21   0     1008   0   5498584 100 '.keys()[6]'
-            #      9     21   0      840   0   5499424 100 '.keys()[2]'
-
-            ipList, records = result
-            N_records = self.rk.len(records)
-            self.fileStatus(
-                fileName, "{:d} purges, {:d} records",
-                len(ipList), N_records)
-            # NOTE: Using this instead of the real dq.put stops the
-            #memory leak, along with all functionality.
-            #dq.put((dtFile, None, fileName))
-            dq.put((dtFile, result, fileName))
-
         def dispatch(fileName):
             def gotInfo(result):
                 if result:
                     self.msgBody("DB datetime: {}", result[0], ID=ID)
                     if result[0] == dtFile:
-                        self.fileStatus(fileName, "{:d} records", result[1])
-                        dq.put((None, None, fileName))
+                        self.fileStatus(
+                            fileName,
+                            "Already loaded, {:d} records", result[1])
                         return
+                    self.fileStatus(fileName, "File was updated, reloading")
                 else:
-                    self.msgBody("No DB entry", ID=ID)
-                self.fileStatus(fileName, "Parsing...")
-                # AsynQueue needs some work before timeout can be used
-                d = self.pq.call(
-                    parser, filePath, timeout=self.timeout)
-                d.addCallback(gotSomeResults, fileName, dtFile)
-                d.addErrback(self.oops, "Parsing of '{}'", fileName)
-                return d
+                    self.fileStatus(fileName, "New file")
+                self.msgBody("Dispatching file for loading", ID=ID)
+                # Get a ProcessConsumer for this file
+                consumer = self.rk.consumerFactory(fileName)
+                # Call the ProcessReader on one of my subordinate
+                # processes to have it feed the consumer with
+                # misbehaving IP addresses and filtered records
+                return self.pq.call(self.pr, filePath, consumer=consumer)
 
             ID = self.msgHeading("Checking for '{}' update", fileName)
             filePath = self.pathInDir(fileName)
@@ -296,52 +259,23 @@ class Reader(KWParse, Base):
             self.msgBody("File datetime: {}", dtFile, ID=ID)
             return self.rk.fileInfo(fileName).addCallbacks(gotInfo, self.oops)
 
-        @defer.inlineCallbacks
-        def resultsLoop(*args):
-            while self.isRunning and filesLeft:
-                dtFile, stuff, fileName = yield dq.get()
-                filesLeft.remove(fileName)
-                if stuff is None:
-                    # Non-parsed file, reflected already in DB
-                    continue
-                ipList, records = stuff
-                self.fileStatus(fileName, "Purging & adding...")
-                dList = []
-                for ip in ipList:
-                    d = self.rk.purgeIP(ip)
-                    d.addCallback(lambda _ : self.fileStatus(fileName))
-                    d.addErrback(
-                        self.oops,
-                        "Trying to purge IP {} while processing '{}'",
-                        ip, fileName)
-                    dList.append(d)
-                N_total = self.rk.len(records)
-                N_added = yield self.rk.addRecords(
-                    records, fileName).addErrback(
-                        self.oops,
-                        "Trying to add records for {}", fileName)
-                self.fileStatus(
-                    fileName,
-                    "Added {:d} of {:d} records", N_added, N_total)
-                # Write the files entry into the DB only now that its
-                # records have been accounted for
-                dList.append(self.rk.fileInfo(
-                    fileName, dtFile, N_total, niceness=15))
-                # Only now, after the records have all been added, do
-                # we wait for the low-priority IP purging and DB write
-                yield defer.DeferredList(dList)
-            result = self.rk.getIPs()
+        def done(null):
             if hasattr(self, 'dShutdown'):
-                self.dShutdown.callback(result)
-            defer.returnValue(result)
+                self.dShutdown.callback(None)
+            ipList = self.rk.getNewIPs()
+            self.msgOrphan(
+                "Done. Identified {:d} misbehaving IP addresses", len(ipList))
+            return ipList
 
         self.isRunning = True
         filesLeft = copy(self.fileNames)
         self.pq = self.getQueue()
         # The files are all dispatched at once
+        dList = []
         for fileName in self.fileNames:
             # References to the deferreds are stored in the process
             # queue, and we wait for their results. No need to keep
             # references returned from dispatch calls.
-            dispatch(fileName)
-        return self.rk.startup().addCallback(resultsLoop, self.oops)    
+            dList.append(dispatch(fileName))
+        return self.rk.startup().addCallback(
+            lambda _: defer.DeferredList(dList)).addCallbacks(done, self.oops)

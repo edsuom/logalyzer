@@ -236,12 +236,13 @@ class Recorder(Base):
         """
         I generate and return a log reader with all its rules loaded 
         """
+        rules = self.loadRules()
         return logread.Reader(
-            self.logFiles, dbURL,
+            self.logFiles, rules, dbURL,
             cores=self.opt['cores'],
             vhost=self.opt['vhost'],
             exclude=self.csvTextToList(self.opt['e'], int),
-            ignoreSecondary=self.opt['y']),
+            ignoreSecondary=self.opt['y'],
             verbose=self.verbose, info=self.opt['info'],
             warnings=self.opt['w'], gui=self.gui)
 
@@ -267,9 +268,8 @@ class Recorder(Base):
             else:
                 reactor.stop()
 
-        rules = self.loadRules()
         # Almost all of my time is spent in this next line
-        d = self.reader.run(rules)
+        d = self.reader.run()
         d.addCallbacks(self._doneReading, self.oops)
         d.addCallbacks(allDone, self.oops)
         return d

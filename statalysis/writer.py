@@ -7,6 +7,8 @@ LICENSE
 Copyright (C) 2015 Tellectual LLC
 """
 
+from util import Base
+
 
 class IPWriter(Base):
     """

@@ -13,6 +13,8 @@ from copy import copy
 from twisted.internet import defer
 from twisted.python import failure
 
+from asynqueue.iteration import Delay
+
 from testbase import *
 import database
 
@@ -101,6 +103,23 @@ class TestTransactor(TestCase):
                 pe(name, value, clear=True)
                 self.assertEqual(pe(name, value), None)
 
+    @defer.inlineCallbacks
+    def test_preload(self):
+        # Write four dt-ip combos to DB
+        for dt in (dt1, dt2):
+            for ip in (ip1, ip2):
+                values = makeEntry(ip, 200, False)
+                yield self.t.insertEntry(dt, values)
+        # Do the preload
+        ipm = yield self.t.preload()
+        # Check the IP Matcher
+        for ip, expected in ((ip1, True), (ip2, True), ("192.168.1.1", False)):
+            self.assertEqual(ipm(ip), expected)
+        # Wait for and check the DTK
+        yield Delay().untilEvent(lambda: not self.t.dtk.isPending())
+        for dt, expected in ((dt1, True), (dt2, True), (dt3, False)):
+            self.assertEqual(self.t.dtk.check(dt), expected)
+                
     @defer.inlineCallbacks
     def test_matchingEntry(self):
         values = makeEntry(ip1, 200, False)

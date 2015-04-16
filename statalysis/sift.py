@@ -91,6 +91,9 @@ class IPMatcher(MatcherBase):
             self.ipHashes.append(ipHash)
             return
         k = bisect(self.ipHashes, ipHash)
+        # Ignore if already in my list
+        if k == 1 and self.ipHashes[0] == ipHash:
+            return
         if k < self.N and self.ipHashes[k] == ipHash:
             return
         self.N += 1
@@ -99,17 +102,18 @@ class IPMatcher(MatcherBase):
         if ignoreCache:
             return
         # Clear the misses cache of this IP
-        self.cm.clear(0, ip)
+        self.cm.clear(1, ip)
 
     def removeIP(self, ip):
         """
         Call this with an IP address (string format) to remove it from my
         list if it's there.
         """
+        # Clear the hits cache of this IP
+        self.cm.clear(0, ip)
         ipHash = self.dqToHash(ip)
-        k = bisect(self.ipHashes, ipHash)
-        if k < self.N and self.ipHashes[k] == ipHash:
-            del self.ipHashes[k]
+        if self.hasHash(ipHash):
+            self.ipHashes.remove(ipHash)
             self.N -= 1
     
     def hasHash(self, ipHash):

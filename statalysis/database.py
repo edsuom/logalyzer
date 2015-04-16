@@ -110,7 +110,7 @@ class PreloadConsumer(object):
         """
         All I care about is having rows written
         """
-        self.f(row[0], **kw)
+        self.f(row[0], **self.kw)
 
 
 class RecordConsumer(ListConsumer):
@@ -212,7 +212,6 @@ class Transactor(AccessBroker, util.Base):
             return self.selectorator(s, consumer)
         
         def run():
-            col = self.entries.c
             # IP matcher
             dIPM = load('ip', ipm.addIP, ignoreCache=True)
             dIPM.addCallback(lambda _: ipm)
@@ -224,6 +223,7 @@ class Transactor(AccessBroker, util.Base):
             return dIPM
 
         ipm = IPMatcher()
+        col = self.entries.c
         return self.callWhenRunning(run)
 
     def setRecord(self, dt, record):

@@ -7,7 +7,9 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 """
 
+from zope.interface import implements
 from twisted.internet import defer
+from twisted.internet.interfaces import IConsumer
 
 from asynqueue.util import DeferredTracker
 
@@ -24,36 +26,43 @@ class ProcessConsumer(Base):
     
     def __init__(self, recordKeeper, fileName, msgID=None, verbose=False):
         self.count = 0
-        self.producer = None
         self.rk = recordKeeper
         self.fileName = fileName
         self.msgID = msgID
         self.verbose = verbose
     
     def registerProducer(self, producer, streaming):
-        if self.producer:
+        if hasattr(self, 'producer'):
             raise RuntimeError()
         if not streaming:
             raise TypeError("I only work with push producers")
+        self.producer = producer
         producer.registerConsumer(self)
-        self.msg("Producer {} registered", repr(producer))
+        self.ID = self.msgHeading("Producer {} registered", repr(producer))
+        if self.msgID:
+            self.rk.msgBody(
+                "Process now loading file {}", self.fileName, ID=self.msgID)
     
     def unregisterProducer(self):
-        self.producer = None
-        self.msg("Producer unregistered")
-
+        del self.producer
+        self.msgBody("Producer unregistered", ID=self.ID)
+        if self.msgID:
+            self.rk.msgBody("Done", ID=self.msgID)
+        self.rk.fileStatus(self.fileName, "Loaded {:d} records", self.count)
+    
     def write(self, x):
         def done(null):
             self.producer.resumeProducing()
-            if self.msgID:
-                self.count += 1
-                if not self.count % 10:
+            self.count += 1
+            if not self.count % 10:
+                self.rk.fileProgress(self.fileName)
+                if self.msgID:
                     self.rk.msgProgress(self.msgID)
         
         if isinstance(x, str):
             # No need to pause producer for a mere IP address
             self.rk.purgeIP(x)
-            self.msg("Misbehaving IP: {}", x)
+            self.msgBody("Misbehaving IP: {}", x, ID=self.ID)
         else:
             # Writing records can take long enough to pause the
             # producer until it's done. That keeps my DB transaction
@@ -61,11 +70,10 @@ class ProcessConsumer(Base):
             # pending records.
             dt, record = x
             self.producer.pauseProducing()
-            self.rk.addRecord(
-                dt, record, self.fileName).addCallbacks(done, self.oops)
-            self.msg(
+            self.rk.addRecord(dt, record).addCallbacks(done, self.oops)
+            self.msgBody(
                 "Record from logfile '{}' for '{}': {}",
-                self.fileName, dt, record)
+                self.fileName, dt, record, ID=self.ID)
             
                 
 class RecordKeeper(Base):
@@ -94,11 +102,18 @@ class RecordKeeper(Base):
             self.ipm = ipm
             self.msgBody("{:d} IP addresses", len(ipm), ID=ID)
         ID = self.msgHeading("Preloading IP Matcher from DB")
-        return self.t.preload().addCallbacks(done, self.oops)
+        return self.t.callWhenRunning(
+            self.t.preload).addCallbacks(done, self.oops)
         
     def shutdown(self):
         return self.dt.deferToAll().addCallback(lambda _: self.t.shutdown())
 
+    def fileInfo(self, *args):
+        """
+        See L{database.Transactor.fileInfo}
+        """
+        return self.t.fileInfo(*args)
+        
     def purgeIP(self, ip):
         """
         Purges my records (and database, if any) of entries from the
@@ -108,7 +123,9 @@ class RecordKeeper(Base):
         ignored.
 
         If the database is to be updated, adds the deferred from that
-        transaction to my DeferredTracker. Returns nothing.
+        transaction to my DeferredTracker. Returns the deferred, too,
+        but you can ignore it.
+
         """
         def donePurging(N):
             self.msgBody(
@@ -131,9 +148,10 @@ class RecordKeeper(Base):
         ID = self.msgHeading("Purging IP address {}", ip)
         d = self.t.purgeIP(ip, niceness=15)
         d.addCallbacks(donePurging, self.oops)
-        dt.put(d)
+        self.dt.put(d)
+        return d
 
-    def addRecord(self, dt, record, fileName=None):
+    def addRecord(self, dt, record):
         """
         Adds the supplied record to the database for the specified
         datetime, if it's not already there.
@@ -141,35 +159,28 @@ class RecordKeeper(Base):
         Note: Multiple identical HTTP queries occurring during the
         same second will be viewed as a single one. That shouldn't be
         an issue.
-
-        Call from within a particular logfile context to update a file
-        progress indicator as each record is added.
         
         Adds the deferred from the DB transaction to my
-        DeferredTracker and returns it.
+        DeferredTracker and returns it. It will fire with a 2-tuple: A
+        Bool indicating if a new entry was added, and the integer ID
+        of the new or existing entry, see
+        L{database.Transactor.setRecord}.
 
         """
-        def done(result):
-            if result[0]:
-                self.fileProgress(fileName)
-
         self.ipm.addIP(record['ip'])
-        d = self.t.setRecord(dt, k, record)
-        if fileName:
-            d.addCallback(done)
+        d = self.t.setRecord(dt, record)
         d.addErrback(self.oops)
         self.dt.put(d)
         return d
 
-    def consumerFactory(self, fileName):
+    def consumerFactory(self, fileName, msgID=None):
         """
         Constructs and returns a reference to a new L{ProcessConsumer}
         that obtains nasty IP addresses and new records from a process
         parsing a particular logfile.
         """
-        ID = self.msgHeading(
-            "Adding {:d} records for '{}'", N_records, fileName)
-        return ProcessConsumer(self, fileName, msgID=ID, verbose=self.info)
+        return ProcessConsumer(
+            self, fileName, msgID=msgID, verbose=self.info)
     
     def getNewIPs(self):
         """
