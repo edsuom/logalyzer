@@ -102,10 +102,10 @@ parallel. Set to 0 and the queue will run in a threadpool instead.
 Run verbosely
 
 --info
-Provide info about IP records being purged
+Run even more verbosely
 
 -w, --warn
-Provide database transaction info
+Extreme verbosity, with database transaction info
 
 -g, --gui
 Run with console-mode GUI (implies -v, --info, and -w)

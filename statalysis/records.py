@@ -16,13 +16,19 @@ import database
 
 
 class ProcessConsumer(Base):
+    """
+    I consume bad IP addresses and good records from a logfile parsing
+    process.
+    """
     implements(IConsumer)
     
-    def __init__(self, recordKeeper, fileName, verbose=False):
+    def __init__(self, recordKeeper, fileName, msgID=None, verbose=False):
+        self.count = 0
+        self.producer = None
         self.rk = recordKeeper
         self.fileName = fileName
+        self.msgID = msgID
         self.verbose = verbose
-        self.producer = None
     
     def registerProducer(self, producer, streaming):
         if self.producer:
@@ -36,13 +42,31 @@ class ProcessConsumer(Base):
         self.producer = None
         self.msg("Producer unregistered")
 
-    def write(self, data):
-        self.producer.pauseProducing()
-        if isinstance(data, str):
-            self.rk.purgeIP
+    def write(self, x):
+        def done(null):
+            self.producer.resumeProducing()
+            if self.msgID:
+                self.count += 1
+                if not self.count % 10:
+                    self.rk.msgProgress(self.msgID)
+        
+        if isinstance(x, str):
+            # No need to pause producer for a mere IP address
+            self.rk.purgeIP(x)
+            self.msg("Bad IP: {}", x)
+        else:
+            # Writing records can take long enough to pause the
+            # producer until it's done. That keeps my DB transaction
+            # queue's memory usage from ballooning with a backlog of
+            # pending records.
+            dt, record = x
+            self.producer.pauseProducing()
+            self.rk.addRecord(
+                dt, record, self.fileName).addCallbacks(done, self.oops)
+            self.msg(
+                "Record from logfile '{}' for '{}': {}",
+                self.fileName, dt, record)
             
-        self.msg("Data received, len: {:d}", len(data))
-
                 
 class RecordKeeper(Base):
     """
@@ -56,12 +80,12 @@ class RecordKeeper(Base):
     I{ipm} attributes to avoid database activity.
 
     """
-    def __init__(self, dbURL, warnings=False, echo=False, gui=None):
+    def __init__(self, dbURL, verbose=False, echo=False, gui=None):
         # List of IP addresses purged during this session
         self.ipList = []
         self.dt = DeferredTracker()
         self.t = database.Transactor(dbURL, verbose=echo, echo=echo)
-        self.verbose = warnings
+        self.verbose = verbose
         self.gui = gui
 
     def startup(self):
@@ -73,12 +97,6 @@ class RecordKeeper(Base):
         
     def shutdown(self):
         return self.dt.deferToAll().addCallback(lambda _: self.t.shutdown())
-
-    def len(self, records):
-        N = 0
-        for theseRecords in records.itervalues():
-            N += len(theseRecords)
-        return N
 
     def purgeIP(self, ip):
         """
@@ -127,7 +145,7 @@ class RecordKeeper(Base):
         progress indicator as each record is added.
         
         Adds the deferred from the DB transaction to my
-        DeferredTracker. Returns nothing.
+        DeferredTracker and returns it.
 
         """
         def done(result):
@@ -148,29 +166,9 @@ class RecordKeeper(Base):
         that obtains nasty IP addresses and new records from a process
         parsing a particular logfile.
         """
-        pc = ProcessConsumer(self, fileName, self.verbose)
-        
-
-        
-    def startAddingRecords(self, fileName):
-        N = 0
-        N_records = self.len(records)
-        count = 0
         ID = self.msgHeading(
             "Adding {:d} records for '{}'", N_records, fileName)
-        for dt, theseRecords in records.iteritems():
-            for k, thisRecord in enumerate(theseRecords):
-                d = self.addRecord(dt, k, thisRecord)
-                d.addErrback(
-                    self.oops,
-                    "addRecords(<{:d} records>, {}", N_records, fileName)
-
-                inc = yield d
-                N += inc
-                count += 1
-                if not count % 10:
-                    self.msgProgress(ID)
-        defer.returnValue(N)
+        return ProcessConsumer(self, fileName, ID, self.verbose)
     
     def getIPs(self):
         """

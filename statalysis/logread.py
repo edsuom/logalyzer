@@ -138,7 +138,7 @@ class ProcessReader(object):
         to be rejected as I continue parsing.
         """
         for IP in IPs:
-            self.ipm.addIP(ip, ignoreCache=True)
+            self.ipm.addIP(ip)
         
     def __call__(self, fileName):
         """
@@ -156,7 +156,7 @@ class ProcessReader(object):
                 stuff = self.makeRecord(line)
                 if stuff:
                     yield stuff
-    
+
     
 class Reader(Base):
     """
@@ -169,9 +169,8 @@ class Reader(Base):
             verbose=False, info=False, warnings=False, gui=None):
         #----------------------------------------------------------------------
         self.fileNames = logFiles
-        from records import MasterRecordKeeper
-        self.rk = MasterRecordKeeper(dbURL, warnings=warnings, gui=gui)
-        self.t = self.rk.trans
+        from records import RecordKeeper
+        self.rk = RecordKeeper(dbURL, verbose=info, echo=echo, gui=gui)
         self.cores = cores
         self.info = info
         self.verbose = verbose
@@ -278,7 +277,7 @@ class Reader(Base):
             filePath = self.pathInDir(fileName)
             dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
             self.msgBody("File datetime: {}", dtFile, ID=ID)
-            return self.t.fileInfo(fileName).addCallbacks(gotInfo, self.oops)
+            return self.rk.fileInfo(fileName).addCallbacks(gotInfo, self.oops)
 
         @defer.inlineCallbacks
         def resultsLoop(*args):
@@ -309,7 +308,7 @@ class Reader(Base):
                     "Added {:d} of {:d} records", N_added, N_total)
                 # Write the files entry into the DB only now that its
                 # records have been accounted for
-                dList.append(self.t.fileInfo(
+                dList.append(self.rk.fileInfo(
                     fileName, dtFile, N_total, niceness=15))
                 # Only now, after the records have all been added, do
                 # we wait for the low-priority IP purging and DB write
