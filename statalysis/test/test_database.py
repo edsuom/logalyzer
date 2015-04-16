@@ -65,7 +65,7 @@ class TestDTK(TestCase):
         
 
 class TestTransactor(TestCase):
-    verbose = True
+    verbose = False
     spew = False
     
     def setUp(self):
@@ -107,7 +107,8 @@ class TestTransactor(TestCase):
         # Should be none there yet
         ID = yield self.t.matchingEntry(dt1, values)
         self.assertNone(ID)
-        ID1 = yield self.t.setEntry(dt1, values)
+        wi, ID1 = yield self.t.setEntry(dt1, values)
+        self.assertTrue(wi)
         # Now there should be
         ID = yield self.t.matchingEntry(dt1, values)
         self.assertEqual(ID, ID1)
@@ -129,27 +130,44 @@ class TestTransactor(TestCase):
         values = makeEntry(ip1, 200, False)
 
         # New entry
-        ID1 = yield self.t.setEntry(dt1, values)
+        wi, ID1 = yield self.t.setEntry(dt1, values)
+        # Was inserted
+        self.assertTrue(wi)
         # Must be an integer ID
         self.assertIsInstance(ID1, (int, long))
-        # DTK was checked and set
-        self.assertEqual(cm, [['check', dt1], ['set', dt1]])
+        # DTK was set, though not checked because still dtk_pending
+        self.assertEqual(cm, [['set', dt1]])
                          
         # Duplicate entry
-        ID2 = yield self.t.setEntry(dt1, values)
+        wi, ID2 = yield self.t.setEntry(dt1, values)
+        # Not inserted
+        self.assertFalse(wi)
         # Same as the other one
         self.assertEqual(ID2, ID1)
-        # DTK was checked
-        self.assertEqual(len(cm), 3)
-        self.assertEqual(cm[-1], ['check', dt1])
+        # DTK was neither checked nor set
+        self.assertEqual(len(cm), 1)
 
+        # dtk no longer pending
+        self.t.dtk.isPending(False)
+        
+        # Duplicate entry again
+        wi, ID2 = yield self.t.setEntry(dt1, values)
+        # Not inserted, same ID
+        self.assertFalse(wi)
+        self.assertEqual(ID2, ID1)
+        # DTK was check, not set
+        self.assertEqual(len(cm), 2)
+        self.assertEqual(cm[-1], ['check', dt1])
+        
         # New entry: different dt, same values
-        ID3 = yield self.t.setEntry(dt2, values)
+        wi, ID3 = yield self.t.setEntry(dt2, values)
+        # Was inserted
+        self.assertTrue(wi)
         # New ID
         self.assertIsInstance(ID3, (int, long))
         self.assertNotEqual(ID3, ID1)
         # DTK was checked and set
-        self.assertEqual(len(cm), 5)
+        self.assertEqual(len(cm), 4)
         self.assertEqual(cm[-2:], [['check', dt2], ['set', dt2]])
         
     @defer.inlineCallbacks
@@ -232,7 +250,9 @@ class TestTransactor(TestCase):
     def test_setRecord(self):
         firstRecord = RECORDS[dt1][0]
         # Set once and check what we get is what we set
-        ID1 = yield self.t.setRecord(dt1, firstRecord)
+        wi, ID1 = yield self.t.setRecord(dt1, firstRecord)
+        # Was inserted
+        self.assertTrue(wi)
         self.assertIsInstance(ID1, (int, long))
         records = yield self.t.getRecords(dt1)
         self.assertEqual(len(records), 1)
@@ -240,7 +260,9 @@ class TestTransactor(TestCase):
         # Set again with slight difference
         modRecord = firstRecord.copy()
         modRecord['ua'] = "Foo Browser/1.2"
-        ID2 = yield self.t.setRecord(dt1, modRecord)
+        wi, ID2 = yield self.t.setRecord(dt1, modRecord)
+        # Was inserted
+        self.assertTrue(wi)
         self.assertIsInstance(ID2, (int, long))
         self.assertNotEqual(ID2, ID1)
         records = yield self.t.getRecords(dt1)

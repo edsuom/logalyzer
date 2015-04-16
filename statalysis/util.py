@@ -48,6 +48,7 @@ class CacheManager(object):
         """
         Generates the FIFO queue for a new sort-of LRU cache of strings
         and returns its index, starting with 0 for the first cache.
+
         """
         if not hasattr(self, 'caches'):
             self.caches = []

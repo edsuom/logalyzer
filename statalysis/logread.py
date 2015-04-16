@@ -5,139 +5,42 @@
 LICENSE
 Copyright (C) 2014-2015 Tellectual LLC
 
-Lots of lists. At 20th file result, 15406 lists:
-
-hd[0].byvia
-----------------------
-13k [0]
-642 [1]
-406 [2]
- 18 [3]
-  8 [4]
-  6 [5]
-  6 [5]
-
-Pretty clear these are k values from dt-k
-
 """
 
 import os, re, gzip
 from copy import copy
 from datetime import datetime
+from collections import OrderedDict
 
 from zope.interface import implements
-from twisted.internet import defer, reactor
+from twisted.internet import defer
 from twisted.internet.interfaces import IConsumer
 
 import asynqueue
 
+import parse
 from util import *
-import sift
 
-    
-class Parser(Base):
-    """ 
-    I parse logfile lines to generate timestamp-keyed records. Send an
-    instance of me to your processes.
 
-    Instantiate me with a dict of matchers (ipMatcher, uaMatcher,
-    and/or botMatcher). If you want to exclude any HTTP codes, list
-    them with exclude.
+class ProcessReader(object):
     """
-    reTwistdPrefix = rc(
-        rdb("-", 4, 2, 2),              # 1111-22-33
-        rdb(":", 2, 2, 2) + r'\+\d+',   # 44-55-66
-        r'\[(.+?)\]',                   # 7+
-        r'(.+)'                         # 8+ (= CLF portion)
-        )
-
-    reCLF = rc(
-        # IP Address
-        r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',        # 1
-        # vhost
-        r'([\w\-\.]+)',                                 # 2
-        r'\-',
-        # [Date/time block]
-        r'\[(.+?)\]',                                   # 3
-        # HTTP Request, swallowing the open quote
-        r'\"([A-Z]+)',                                  # 4
-        # URL
-        r'(\S+)',                                       # 5
-        # HTTP/1.1 or whatever, ignored along with the close quote
-        r'[^\s\"]+\"',
-        # Code
-        r'(\d{3})',                                     # 6
-        # Bytes
-        r'(\d+|\-)',                                    # 7
-        # Referrer
-        r'\"(.+?)\"',                                   # 8
-        # User Agent
-        r'\"(.+?)\"'                                    # 9
-        )
-
-    reDatetime = re.compile(
-        # Day/Month                 # Year:Hr:Min:Sec
-        r'(\d{1,2})/([^/]+)/' + rdb(":", 4, 2, 2, 2))
-
+    Subordinate Python processes use their own instances of me to read
+    logfiles.
+    """
     reSecondary = re.compile(
         r'(\.(jpg|jpeg|png|gif|css|ico|woff|ttf|svg|eot\??))' +\
         r'|(robots\.txt|sitemap\.xml|googlecea.+\.html)$')
 
-    months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    def __init__(self, matchers, **kw):
+        for name, default in (
+                ('vhost', None), ('exclude', []), ('ignoreSecondary', False)):
+            value = kw.get(name, default)
+            setattr(name, value)
+        self.p = parse.LineParser()
+        self.m = parse.MatcherManager(matchers)
+        self.rc = parse.RedirectChecker()
+        self.ipm = sift.IPMatcher()
 
-    matcherTable = (
-        ('ipMatcher',  'IPMatcher'),
-        ('netMatcher', 'NetMatcher'),
-        ('uaMatcher',  'UAMatcher'),
-        ('botMatcher', 'BotMatcher'),
-        ('refMatcher', 'RefMatcher'))
-
-    def __init__(
-            self, matchers,
-            vhost=None, exclude=[], ignoreSecondary=False,
-            verbose=False):
-        #----------------------------------------------------------------------
-        for callableName, matcherName in self.matcherTable:
-            if matcherName in matchers:
-                setattr(self, callableName, matchers[matcherName])
-        from records import ParserRecordKeeper
-        self.rk = ParserRecordKeeper()
-        self.vhost = vhost
-        self.exclude = exclude
-        self.ignoreSecondary = ignoreSecondary
-        self.verbose = verbose
-
-    def ipMatcher(self, ip):
-        """
-        Never matches any IP address if no ipMatcher supplied.
-        """
-        return False
-
-    def netMatcher(self, ip):
-        """
-        Never matches any IP address if no netMatcher supplied.
-        """
-        return False
-
-    def uaMatcher(self, ip, uaString):
-        """
-        Never matches any UA string if no uaMatcher supplied.
-        """
-        return False
-
-    def botMatcher(self, ip, url):
-        """
-        Never matches any url if no botMatcher supplied.
-        """
-        return False
-
-    def refMatcher(self, ip, url):
-        """
-        Never matches any referrer string if no refMatcher supplied.
-        """
-        return False
-    
     def file(self, filePath):
         """
         Opens a file (possibly a compressed one), returning a file
@@ -149,82 +52,52 @@ class Parser(Base):
             fh = open(filePath, mode="r")
         return fh
 
-    def dtFactory(self, *args):
-        intArgs = [int(x) for x in args]
-        return datetime(*intArgs)
-
-    def parseDatetimeBlock(self, text):
-        """
-        Returns a datetime object for the date & time in the supplied
-        text string
-        """
-        match = self.reDatetime.match(text)
-        if match is None:
-            raise ValueError("Invalid date/time '{}'".format(text))
-        day, monthName, year, hour, minute, second = match.groups()
-        month = self.months.index(monthName) + 1
-        return self.dtFactory(year, month, day, hour, minute, second)
-
-    def parseLine(self, line):
-        """
-        Parses an individual logfile line and returns a list:
-
-        [vhost, Requestor IP address, datetime, url, http, referrer, UA]
-
-        """
-        dt = None
-        match = self.reTwistdPrefix.match(line)
-        if match:
-            dt = self.dtFactory(*match.groups()[:6])
-            if match.group(7) == '-':
-                return
-            line = match.group(8)
-        match = self.reCLF.match(line)
-        if match is None:
-            return
-        result = [match.group(2).lower(), match.group(1)]
-        if dt is None:
-            dt = self.parseDatetimeBlock(match.group(3))
-        result.extend([dt, match.group(5), int(match.group(6))])
-        result.extend(match.group(8, 9))
-        return result
-
-    def makeRecord(self, line, alreadyParsed=False):
+    def makeRecord(self, line):
         """
         This is where most of the processing time gets spent.
 
-        Supply a mess of logfile lines and this method will iterate over
-        the parsed results for the specified vhost (or all vhosts, if
-        none was specified in my constructor) to generate a datetime
-        object and dict for each valid line. The dict contains the
-        following entries:
+        Given one line of a logfile, returns one of the following
+        three types:
 
-        http:   HTTP code
-        vhost:  Virtual host requested
-        was_rd: C{True} if there was a redirect to this URL
-        ip:     Requestor IP address
-        url:    Requested url
-        ref:    Referrer
-        ua:     The requestor's User-Agent string.
+        * A C{None} object if the logfile line was rejected.
 
-        The dict entry was_rd indictates if the vhost listed was the
+        * A string containing the dotted-quad form of an IP address
+          whose behavior not only caused the line to be rejected but
+          also all other lines from that IP address
+
+        * A 2-tuple containing a datetime object and a dict describing
+          the record for the logfile valid line. The dict contains the
+          following entries:
+
+            ip:     Requestor IP address
+            http:   HTTP code
+            vhost:  Virtual host requested
+            was_rd: C{True} if there was a redirect to this URL
+            url:    Requested url
+            ref:    Referrer
+            ua:     The requestor's User-Agent string.
+
+        The dict entry 'was_rd' indictates if the vhost listed was the
         original vhost requested before a redirect. In that case the
         redirect-destination vhost isn't used, though it may be the
         same.
 
-        If my ignoreSecondary attribute is set and this is a secondary
-        file (css or image), it is ignored with no further checks.
+        If my I{ignoreSecondary} attribute is set and this is a
+        secondary file (css or image), it is ignored with no further
+        checks.
 
-        If one or more HTTP codes are supplied in my exclude
+        If one or more HTTP codes are supplied in my I{exclude}
         attribute, then lines with those codes will be ignored.
         """
-        stuff = line if alreadyParsed else self.parseLine(line)
+        stuff = self.p(line)
         if stuff is None:
             # Bogus line
             return
         vhost, ip, dt, url, http, ref, ua = stuff
-        # First and fastest of all is checking for known bad guys
-        if ip in self.rk.ipList or self.ipMatcher(ip):
+        # First and fastest of all is checking for known bad guys. We
+        # check our dedicated purged-IP matcher and then an IP matcher
+        # for 'ip' rules, if any.
+        if self.ipm(ip) or self.m.ipMatcher(ip):
             return
         # Now check for secondary file, if we are ignoring those
         if self.ignoreSecondary and self.reSecondary.search(url):
@@ -232,81 +105,58 @@ class Parser(Base):
         # Then do some relatively easy exclusion checks, starting with
         # botMatcher and refMatcher so we can harvest the most bot IP
         # addresses (useful if -i option set)
-        if self.botMatcher(ip, url) or self.refMatcher(ip, ref):
-            wasPurged = self.rk.purgeIP(ip)
-            if wasPurged:
-                self.msgBody(line)
+        if self.m.botMatcher(ip, url) or self.m.refMatcher(ip, ref):
+            # Misbehaving IP
+            self.ipm.addIP(ip)
             return ip
         if self.exclude:
             if http in self.exclude:
                 # Excluded code
                 return
-        if self.uaMatcher(ip, ua):
+        if self.m.uaMatcher(ip, ua):
             # Excluded UA string
             return
         # OK, this is an approved record ... unless the vhost is
         # excluded, and unless there is an IP address match
         record = {
-            'http': http,
-            'ip': ip, 'url': url, 'ref': ref, 'ua': ua }
-        record['was_rd'], record['vhost'] = self.rk.isRedirect(vhost, ip, http)
+            'ip': ip, 'http': http,
+            'url': url, 'ref': ref, 'ua': ua }
+        record['was_rd'], record['vhost'] = self.rc(vhost, ip, http)
         if self.vhost and self.vhost != record['vhost']:
             # Excluded vhost, so bail right now
             return
         # The last and by FAR the most time-consuming check is for
         # excluded networks. Only done if all other checks have
         # passed.
-        if self.netMatcher(ip):
+        if self.m.netMatcher(ip):
             return
         return dt, record
 
-    def processator(self, fileName):
+    def ignoreIPs(self, IPs):
         """
-        Processes the specified logfile, yielding nasty IP addresses as
-        they are identified and purging them from my records.
+        The supervising process may call this with a list of IP addresses
+        to be rejected as I continue parsing.
         """
-        fh = self.file(fileName)
-        for line in fh:
-            try:
-                # This next line is where most of the processing time is spent
-                stuff = self.makeRecord(line)
-            except Exception, e:
-                import traceback
-                eType, eValue = e[:2]
-                self.msgHeading(
-                    "ERROR {}: '{}'\n when parsing logfile '{}':\n{}\n",
-                    eType.__name__, eValue, fileName, line)
-                traceback.print_tb(e[2])
-                fh.close()
-                break
-            if isinstance(stuff, (tuple)):
-                self.rk.addRecordToRecords(*stuff)
-            elif stuff:
-                # This line had a newly purged IP address
-                yield stuff
-        fh.close()
-    
+        for IP in IPs:
+            self.ipm.addIP(ip, ignoreCache=True)
+        
     def __call__(self, fileName):
         """
         The public interface to parse a logfile. My processes call this
-        via the queue to iterate first over IP addresses being purged
-        and then records added as a result of parsing. The caller must
-        differentiate between strings (purged IP addresses) and tuples
-        (datetime, record).
-
-        A later optimization may avoid the need for my recordkeeper to
-        store the records, in which case it will just yield them
-        without storing them, unpredicatably interspersed with nasty
-        IP addresses, and let the caller do all the purging. So don't
-        put any stock in when you get what iterated.
+        via the queue to iterate over misbehaving IP addresses and
+        parsed dt-record combinations. The two types iterated are
+        strings (misbehaving IP addresses) and 2-tuples (datetime,
+        record). Either type may be yielded at any time, and the
+        caller must know what to do with them.
         """
-        self.rk.clear()
-        for ip in self.processator(fileName):
-            yield ip
-        for dt, theseRecords in self.rk():
-            for thisRecord in theseRecords:
-                yield dt, thisRecord
-
+        with self.file(fileName) as fh:
+            for line in fh:
+                # This next line is where most of the processing time
+                # is spent
+                stuff = self.makeRecord(line)
+                if stuff:
+                    yield stuff
+    
     
 class Reader(Base):
     """
@@ -428,11 +278,7 @@ class Reader(Base):
             filePath = self.pathInDir(fileName)
             dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
             self.msgBody("File datetime: {}", dtFile, ID=ID)
-            # TODO: WHY is the bottom line not working????
-            #return gotInfo(None)
-            # Now it seems to be, after changes to fileInfo
-            return self.t.fileInfo(
-                fileName).addCallbacks(gotInfo, self.oops)
+            return self.t.fileInfo(fileName).addCallbacks(gotInfo, self.oops)
 
         @defer.inlineCallbacks
         def resultsLoop(*args):
@@ -468,27 +314,12 @@ class Reader(Base):
                 # Only now, after the records have all been added, do
                 # we wait for the low-priority IP purging and DB write
                 yield defer.DeferredList(dList)
-            # Wait for any file writes and closes, too
-            yield defer.DeferredList(dWriteList)
             result = self.rk.getIPs()
             if hasattr(self, 'dShutdown'):
                 self.dShutdown.callback(result)
             defer.returnValue(result)
 
-
-        # DEBUG memory leak
-        # -------------------------------
-        self.N_iter = 0
-        import objgraph
-        objgraph.show_growth(limit=10)
-        from guppy import hpy
-        hp = hpy()
-        hp.setrelheap()
-        # -------------------------------
-
         self.isRunning = True
-        dWriteList = []
-        dq = defer.DeferredQueue()
         filesLeft = copy(self.fileNames)
         parser = Parser(
             self.getMatchers(rules),

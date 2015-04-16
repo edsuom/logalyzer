@@ -499,17 +499,23 @@ class MockDTK(MsgBase):
         self.verbose = verbose
         self.dtList = []
         self.callsMade = []
+        self._pending = True
 
-    def noteCall(self, name, dt):
+    def isPending(self, *args):
+        if args:
+            self._pending = args[0]
+        return self._pending
+
+    def _noteCall(self, name, dt):
         self.msg("DTK: {}({})", name, dt)
         self.callsMade.append([name, dt])
     
     def check(self, dt):
-        self.noteCall('check', dt)
+        self._noteCall('check', dt)
         return dt in self.dtList
 
     def set(self, dt):
-        self.noteCall('set', dt)
+        self._noteCall('set', dt)
         if dt not in self.dtList:
             self.dtList.append(dt)
         
