@@ -64,7 +64,7 @@ class ProcessReader(KWParse):
             fh = open(filePath, mode="r")
         return fh
 
-    def makeRecord(self, line):
+    def makeRecord(self, line, alreadyParsed=False):
         """
         This is where most of the processing time gets spent.
 
@@ -101,7 +101,7 @@ class ProcessReader(KWParse):
         If one or more HTTP codes are supplied in my I{exclude}
         attribute, then lines with those codes will be ignored.
         """
-        stuff = self.p(line)
+        stuff = line if alreadyParsed else self.p(line)
         if stuff is None:
             # Bogus line
             return
@@ -226,7 +226,8 @@ class Reader(KWParse, Base):
         self.msgBody("Master recordkeeper shut down")
         if self.linger():
             yield self.deferToDelay(10)
-            
+
+    @defer.inlineCallbacks
     def run(self):
         """
         Runs everything via the process queue (multiprocessing!),
@@ -259,23 +260,21 @@ class Reader(KWParse, Base):
             self.msgBody("File datetime: {}", dtFile, ID=ID)
             return self.rk.fileInfo(fileName).addCallbacks(gotInfo, self.oops)
 
-        def done(null):
-            if hasattr(self, 'dShutdown'):
-                self.dShutdown.callback(None)
-            ipList = self.rk.getNewIPs()
-            self.msgOrphan(
-                "Done. Identified {:d} misbehaving IP addresses", len(ipList))
-            return ipList
-
-        self.isRunning = True
-        filesLeft = copy(self.fileNames)
-        self.pq = self.getQueue()
-        # The files are all dispatched at once
         dList = []
+        self.isRunning = True
+        self.pq = self.getQueue()
+        yield self.rk.startup()
+        # The files are all dispatched at once
         for fileName in self.fileNames:
             # References to the deferreds are stored in the process
             # queue, and we wait for their results. No need to keep
             # references returned from dispatch calls.
             dList.append(dispatch(fileName))
-        return self.rk.startup().addCallback(
-            lambda _: defer.DeferredList(dList)).addCallbacks(done, self.oops)
+        yield defer.DeferredList(dList)
+        # Processes are done, shut things down
+        if hasattr(self, 'dShutdown'):
+            self.dShutdown.callback(None)
+        ipList = self.rk.getNewIPs()
+        self.msgOrphan(
+            "Done. Identified {:d} misbehaving IP addresses", len(ipList))
+        defer.returnValue(ipList)
