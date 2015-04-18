@@ -24,12 +24,13 @@ class ProcessConsumer(Base):
     """
     implements(IConsumer)
 
-    msgInterval = 100
-    stopInterval = 1000
+    msgInterval = 1000
+    stopInterval = 5000
     
     def __init__(
             self, recordKeeper, fileName, msgID=None, verbose=False, gui=None):
-        self.count = 0
+        self.N_parsed = 0
+        self.N_added = 0
         self.rk = recordKeeper
         self.fileName = fileName
         self.msgID = msgID
@@ -50,24 +51,28 @@ class ProcessConsumer(Base):
     
     def unregisterProducer(self):
         del self.producer
-        self.msgBody("Producer unregistered")
+        self.msgBody(
+            "Added {:d} of {:d} records from producer", self.N_added, self.N_parsed)
         if hasattr(self, 'rk'):
             if self.msgID:
-                self.rk.msgBody("Done", ID=self.msgID)
+                self.rk.msgBody(
+                    "Added {:d} of {:d} records",
+                    self.N_added, self.N_parsed, ID=self.msgID)
             self.rk.fileStatus(
-                self.fileName, "Loaded {:d} records", self.count)
+                self.fileName, "Done: {:d}/{:d}", self.N_added, self.N_parsed)
 
     def write(self, x):
-        def done(null):
-            self.msgProgress()
+        def done(result):
             if hasattr(self, 'producer'):
                 self.producer.resumeProducing()
             if hasattr(self, 'rk'):
-                self.count += 1
-                if not self.count % 10:
+                self.N_parsed += 1
+                if result[0]:
+                    self.N_added += 1
+                if not self.N_parsed % 10:
                     self.rk.fileProgress(self.fileName)
-                    if self.msgID:
-                        self.rk.msgProgress(self.msgID)
+                if self.msgID and not self.N_added % 100:
+                    self.rk.msgProgress(self.msgID)
 
         if not hasattr(self, 'rk'):
             return
@@ -88,8 +93,8 @@ class ProcessConsumer(Base):
             dt, record = x
             # DEBUG: Major memory leak here
             self.producer.pauseProducing()
-            #self.cleak(self.rk.addRecord, dt, record).addCallbacks(done, self.oops)
-            self.rk.addRecord(dt, record).addCallbacks(done, self.oops)
+            self.cleak(self.rk.addRecord, dt, record).addCallbacks(done, self.oops)
+            #self.rk.addRecord(dt, record).addCallbacks(done, self.oops)
 
     def stopProduction(self):
         del self.rk

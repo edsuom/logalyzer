@@ -191,6 +191,11 @@ class Transactor(AccessBroker, util.Base):
                 unique_value=['value']
             )
         yield self.table(
+            'purge',
+            SA.Column('ip', SA.String(15), primary_key=True),
+            SA.Column('purged', SA.Boolean),
+        )
+        yield self.table(
             'files',
             SA.Column(
                 'name', SA.String(self.valueLength), primary_key=True),
