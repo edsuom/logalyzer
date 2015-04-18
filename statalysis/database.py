@@ -20,6 +20,10 @@ import util
 from sift import IPMatcher
 
 
+# DEBUG
+from asynqueue.info import showResult
+
+
 class DTK(object):
     """
     I maintain a CPU-efficient but somewhat memory expensive lookup
@@ -177,12 +181,14 @@ class Transactor(AccessBroker, util.Base):
             SA.Column('id_url', SA.Integer),
             SA.Column('id_ref', SA.Integer),
             SA.Column('id_ua', SA.Integer),
+            index_dt=['dt'], index_ip=['ip']
         )
         for name in self.indexedValues:
             yield self.table(
                 name,
                 SA.Column('id', SA.Integer, primary_key=True),
                 SA.Column('value', SA.String(self.valueLength)),
+                unique_value=['value']
             )
         yield self.table(
             'files',
@@ -472,7 +478,7 @@ class Transactor(AccessBroker, util.Base):
             d.addCallback(done)
         else:
             d = defer.Deferred()
-            d.addCallback(lambda _ : valueDict[value])
+            d.addCallback(lambda _: valueDict[value])
             dID.chainDeferred(d)
         d.addErrback(
             self.oops, "Getting ID for '{}' value '{}'", name, value)

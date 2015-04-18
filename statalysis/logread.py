@@ -13,7 +13,7 @@ from datetime import datetime
 from collections import OrderedDict
 
 from zope.interface import implements
-from twisted.internet import defer
+from twisted.internet import defer, reactor
 from twisted.internet.interfaces import IConsumer
 
 import asynqueue
@@ -48,6 +48,7 @@ class ProcessReader(KWParse):
 
     def __init__(self, matchers, **kw):
         self.parseKW(kw)
+        self.isRunning = False
         self.p = parse.LineParser()
         self.m = parse.MatcherManager(matchers)
         self.rc = parse.RedirectChecker()
@@ -151,7 +152,7 @@ class ProcessReader(KWParse):
         """
         for IP in IPs:
             self.ipm.addIP(ip)
-        
+            
     def __call__(self, fileName):
         """
         The public interface to parse a logfile. My processes call this
@@ -161,8 +162,11 @@ class ProcessReader(KWParse):
         record). Either type may be yielded at any time, and the
         caller must know what to do with them.
         """
+        self.isRunning = True
         with self.file(fileName) as fh:
             for line in fh:
+                if not self.isRunning:
+                    break
                 # This next line is where most of the processing time
                 # is spent
                 stuff = self.makeRecord(line)
@@ -174,6 +178,9 @@ class Reader(KWParse, Base):
     """
     I read and parse web server log files
     """
+    # Maximum number of logfiles to process concurrently
+    N = 6
+    
     keyWords = (
         ('cores', None),
         ('vhost', None), ('exclude', []), ('ignoreSecondary', False),
@@ -182,17 +189,26 @@ class Reader(KWParse, Base):
     
     def __init__(self, logFiles, rules, dbURL, **kw):
         self.parseKW(kw)
+        self.consumers = []
         self.fileNames = logFiles
+        # Two connections for each concurrent parsing of a logfile,
+        # one for each transactions and one for the iterations that
+        # are done for that transaction.
+        N_pool = 2*max([1, 2*self.N_processes])
         from records import RecordKeeper
         self.rk = RecordKeeper(
-            dbURL,
+            dbURL, N_pool,
             verbose=self.verbose, info=self.info, echo=self.warnings,
             gui=self.gui)
         self.pr = ProcessReader(
             self.getMatchers(rules),
             vhost=self.vhost, exclude=self.exclude,
             ignoreSecondary=self.ignoreSecondary)
-        self.isRunning = False
+        # A lock for getting shutdown done right
+        self.lock = asynqueue.DeferredLock()
+        self.lock.addStopper(self.rk.shutdown)
+        reactor.addSystemEventTrigger(
+            'before', 'shutdown', self.shutdown)
 
     def getMatchers(self, rules):
         result = {}
@@ -201,34 +217,33 @@ class Reader(KWParse, Base):
             result[matcherName] = thisMatcher
         return result
 
-    def getQueue(self, thread=False):
-        if thread or (self.cores is not None and int(self.cores) == 0):
-            return asynqueue.ThreadQueue()
+    @property
+    def N_processes(self):
         if self.cores is None:
             cores = asynqueue.ProcessQueue.cores()
         else:
             cores = int(self.cores)
-        return asynqueue.ProcessQueue(cores)
+        return min([self.N, cores])
+        
+    def getQueue(self, thread=False):
+        if thread or (self.N_processes == 0):
+            q = asynqueue.ThreadQueue()
+        else:
+            q = asynqueue.ProcessQueue(self.N_processes)
+        self.lock.addStopper(q.shutdown)
+        return q
     
-    @defer.inlineCallbacks
-    def done(self):
+    def shutdown(self):
         """
         Call this to shut everything down.
         """
-        if self.isRunning:
-            self.dShutdown = defer.Deferred()
-            yield self.dShutdown
-        self.isRunning = False
-        self.msgHeading("Shutting down reader...")
-        yield self.pq.shutdown()
-        self.msgBody("Process queue shut down")
-        yield self.rk.shutdown()
-        self.msgBody("Master recordkeeper shut down")
-        if self.linger():
-            yield self.deferToDelay(10)
+        self.msgHeading("Shutting down...")
+        for consumer in self.consumers:
+            consumer.stopProduction()
+        return self.lock.stop()
 
     @defer.inlineCallbacks
-    def run(self):
+    def run(self, updateOnly=False):
         """
         Runs everything via the process queue (multiprocessing!),
         returning a reference to a list of all IP addresses purged
@@ -237,44 +252,60 @@ class Reader(KWParse, Base):
         def dispatch(fileName):
             def gotInfo(result):
                 if result:
-                    self.msgBody("DB datetime: {}", result[0], ID=ID)
-                    if result[0] == dtFile:
+                    dt, N = result
+                    self.msgBody("DB datetime: {}", dt, ID=ID)
+                    if dt == dtFile:
                         self.fileStatus(
-                            fileName,
-                            "Already loaded, {:d} records", result[1])
+                            fileName, "Already loaded, {:d} records", N)
                         return
                     self.fileStatus(fileName, "File was updated, reloading")
                 else:
                     self.fileStatus(fileName, "New file")
+                return load()
+
+            def load():
                 self.msgBody("Dispatching file for loading", ID=ID)
                 # Get a ProcessConsumer for this file
                 consumer = self.rk.consumerFactory(fileName)
+                self.consumers.append(consumer)
                 # Call the ProcessReader on one of my subordinate
                 # processes to have it feed the consumer with
                 # misbehaving IP addresses and filtered records
-                return self.pq.call(self.pr, filePath, consumer=consumer)
+                return self.pq.call(
+                    self.pr, filePath, consumer=consumer).addCallback(
+                        self.consumers.remove)
 
-            ID = self.msgHeading("Checking for '{}' update", fileName)
             filePath = self.pathInDir(fileName)
-            dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
-            self.msgBody("File datetime: {}", dtFile, ID=ID)
-            return self.rk.fileInfo(fileName).addCallbacks(gotInfo, self.oops)
+            ID = self.msgHeading("Logfile {}...", fileName)
+            if updateOnly:
+                dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
+                self.msgBody("File datetime: {}", dtFile, ID=ID)
+                return self.rk.fileInfo(fileName).addCallbacks(gotInfo, self.oops)
+            return load()
 
         dList = []
-        self.isRunning = True
+        self.lock.acquire()
         self.pq = self.getQueue()
+        # We have at most two files being parsed concurrently for each
+        # worker servicing my process queue
+        ds = defer.DeferredSemaphore(min([self.N, 2*len(self.pq)]))
+        # "Wait" for everything to start up
         yield self.rk.startup()
-        # The files are all dispatched at once
+        # Dispatch files as permitted by the semaphore
         for fileName in self.fileNames:
-            # References to the deferreds are stored in the process
-            # queue, and we wait for their results. No need to keep
-            # references returned from dispatch calls.
-            dList.append(dispatch(fileName))
+            # "Wait" for the number of concurrent parsings to fall
+            # back to the limit
+            yield ds.acquire()
+            # References to the deferreds from dispatch calls are
+            # stored in the process queue, and we wait for their
+            # results.
+            d = dispatch(fileName)
+            d.addCallback(lambda _: ds.release())
+            dList.append(d)
+        
         yield defer.DeferredList(dList)
-        # Processes are done, shut things down
-        if hasattr(self, 'dShutdown'):
-            self.dShutdown.callback(None)
+        self.lock.release()
         ipList = self.rk.getNewIPs()
-        self.msgOrphan(
-            "Done. Identified {:d} misbehaving IP addresses", len(ipList))
+        self.msgBody(
+            "Identified {:d} misbehaving IP addresses", len(ipList))
         defer.returnValue(ipList)

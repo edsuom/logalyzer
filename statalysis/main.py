@@ -41,11 +41,6 @@ WARNING: If any of your bot-detecting rules that purge IP addresses
 '/robots.txt', don't use the saved list (--save) to block access to
 your web server!
 
-You can generate a CSV file with the -f option and a filename. Skim
-through it with:
-
-less -x5,8,12,16,21,52,69,75,110,200 -S <file.csv>
-
 
 OPTIONS
 
@@ -82,8 +77,8 @@ sensitive) that match referrer strings indicating a malicious bot
 -y, --secondary
 Ignore secondary files (css, webfonts, images)
 
--f, --csvfile file
-CSV file to write records to
+-t, --timestamp
+Compare logfile timestamps to stored versions in the DB and only parse if newer
 
 -s, --save file
 File in which to save a list of the purged (or consolidated) IP
@@ -255,7 +250,7 @@ class Recorder(Base):
         if filePath:
             w = IPWriter()
             w.writeIPs(ipList, filePath)
-        return self.reader.done()
+        return self.reader.shutdown()
         
     def load(self):
         """
@@ -269,7 +264,7 @@ class Recorder(Base):
                 reactor.stop()
 
         # Almost all of my time is spent in this next line
-        d = self.reader.run()
+        d = self.reader.run(self.opt['t'])
         d.addCallbacks(self._doneReading, self.oops)
         d.addCallbacks(allDone, self.oops)
         return d
@@ -300,7 +295,7 @@ class Recorder(Base):
         self.reader = self.readerFactory(self.opt[0])
         # GUI will stop reader when it shuts down
         if self.gui:
-            self.gui.stoppers.append(self.reader.done)
+            self.gui.stoppers.append(self.reader.shutdown)
         # Everything starts with my load method
         reactor.callWhenRunning(self.load)
         # GO!

@@ -170,7 +170,7 @@ class FileRow(u.ListBox):
     I am one row of your status-updatable file list.
     """
     gutterWidth = 2
-    minRightColWidth = 30
+    minRightColWidth = 25
 
     def __init__(self, fileName, leftColWidth, totalWidth):
         self.p = ProgressText()
@@ -314,7 +314,7 @@ class GUI(object):
             if key in ('q', 'Q'):
                 # NOTE: The warning doesn't show up when program
                 # hangs, but does quit.
-                reactor.stop()
+                reactor.callFromThread(reactor.stop)
                 
         # The top-level widgets
         self.m = Messages()

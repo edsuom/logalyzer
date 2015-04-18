@@ -23,13 +23,18 @@ class ProcessConsumer(Base):
     process.
     """
     implements(IConsumer)
+
+    msgInterval = 100
+    stopInterval = 1000
     
-    def __init__(self, recordKeeper, fileName, msgID=None, verbose=False):
+    def __init__(
+            self, recordKeeper, fileName, msgID=None, verbose=False, gui=None):
         self.count = 0
         self.rk = recordKeeper
         self.fileName = fileName
         self.msgID = msgID
         self.verbose = verbose
+        self.gui = gui
     
     def registerProducer(self, producer, streaming):
         if hasattr(self, 'producer'):
@@ -38,42 +43,58 @@ class ProcessConsumer(Base):
             raise TypeError("I only work with push producers")
         self.producer = producer
         producer.registerConsumer(self)
-        self.ID = self.msgHeading("Producer {} registered", repr(producer))
+        self.msgHeading("Producer {} registered", repr(producer))
         if self.msgID:
             self.rk.msgBody(
                 "Process now loading file {}", self.fileName, ID=self.msgID)
     
     def unregisterProducer(self):
         del self.producer
-        self.msgBody("Producer unregistered", ID=self.ID)
-        if self.msgID:
-            self.rk.msgBody("Done", ID=self.msgID)
-        self.rk.fileStatus(self.fileName, "Loaded {:d} records", self.count)
-    
+        self.msgBody("Producer unregistered")
+        if hasattr(self, 'rk'):
+            if self.msgID:
+                self.rk.msgBody("Done", ID=self.msgID)
+            self.rk.fileStatus(
+                self.fileName, "Loaded {:d} records", self.count)
+
     def write(self, x):
         def done(null):
-            self.producer.resumeProducing()
-            self.count += 1
-            if not self.count % 10:
-                self.rk.fileProgress(self.fileName)
-                if self.msgID:
-                    self.rk.msgProgress(self.msgID)
-        
+            self.msgProgress()
+            if hasattr(self, 'producer'):
+                self.producer.resumeProducing()
+            if hasattr(self, 'rk'):
+                self.count += 1
+                if not self.count % 10:
+                    self.rk.fileProgress(self.fileName)
+                    if self.msgID:
+                        self.rk.msgProgress(self.msgID)
+
+        if not hasattr(self, 'rk'):
+            return
         if isinstance(x, str):
             # No need to pause producer for a mere IP address
-            self.rk.purgeIP(x)
-            self.msgBody("Misbehaving IP: {}", x, ID=self.ID)
+
+            # DEBUG: Disabled to avoid need for lengthy preload while
+            # memory leak debugging
+            #self.rk.purgeIP(x)
+            pass
+            # With both disabled, usage was VM=316MB, RM=111MB
+            # No worse with this enabled
         else:
             # Writing records can take long enough to pause the
             # producer until it's done. That keeps my DB transaction
             # queue's memory usage from ballooning with a backlog of
             # pending records.
             dt, record = x
+            # DEBUG: Major memory leak here
             self.producer.pauseProducing()
+            #self.cleak(self.rk.addRecord, dt, record).addCallbacks(done, self.oops)
             self.rk.addRecord(dt, record).addCallbacks(done, self.oops)
-            self.msgBody(
-                "Record from logfile '{}' for '{}': {}",
-                self.fileName, dt, record, ID=self.ID)
+
+    def stopProduction(self):
+        del self.rk
+        if hasattr(self, 'producer'):
+            self.producer.stopProducing()
             
                 
 class RecordKeeper(Base):
@@ -88,11 +109,15 @@ class RecordKeeper(Base):
     I{ipm} attributes to avoid database activity.
 
     """
-    def __init__(self, dbURL, verbose=False, info=False, echo=False, gui=None):
+    def __init__(
+            self, dbURL, N_pool,
+            verbose=False, info=False, echo=False, gui=None):
+        # ---------------------------------------------------------------------
         # List of IP addresses purged during this session
         self.ipList = []
         self.dt = DeferredTracker()
-        self.t = database.Transactor(dbURL, verbose=echo, echo=echo)
+        self.t = database.Transactor(
+            dbURL, pool_size=N_pool, verbose=echo, echo=echo)
         self.verbose = verbose
         self.info = info
         self.gui = gui
@@ -102,8 +127,11 @@ class RecordKeeper(Base):
             self.ipm = ipm
             self.msgBody("{:d} IP addresses", len(ipm), ID=ID)
         ID = self.msgHeading("Preloading IP Matcher from DB")
-        return self.t.callWhenRunning(
-            self.t.preload).addCallbacks(done, self.oops)
+        # DEBUG
+        d = self.t.waitUntilRunning()
+        #d = self.t.callWhenRunning(
+        #    self.t.preload).addCallbacks(done, self.oops)
+        return self.dt.put(d)
         
     def shutdown(self):
         return self.dt.deferToAll().addCallback(lambda _: self.t.shutdown())
@@ -148,8 +176,7 @@ class RecordKeeper(Base):
         ID = self.msgHeading("Purging IP address {}", ip)
         d = self.t.purgeIP(ip, niceness=15)
         d.addCallbacks(donePurging, self.oops)
-        self.dt.put(d)
-        return d
+        return self.dt.put(d)
 
     def addRecord(self, dt, record):
         """
@@ -167,11 +194,11 @@ class RecordKeeper(Base):
         L{database.Transactor.setRecord}.
 
         """
-        self.ipm.addIP(record['ip'])
+        # DEBUG
+        #self.ipm.addIP(record['ip'])
         d = self.t.setRecord(dt, record)
         d.addErrback(self.oops)
-        self.dt.put(d)
-        return d
+        return self.dt.put(d)
 
     def consumerFactory(self, fileName, msgID=None):
         """
@@ -180,7 +207,8 @@ class RecordKeeper(Base):
         parsing a particular logfile.
         """
         return ProcessConsumer(
-            self, fileName, msgID=msgID, verbose=self.info)
+            self, fileName, msgID=msgID, verbose=self.verbose, gui=self.gui)
+        #verbose=self.info)
     
     def getNewIPs(self):
         """

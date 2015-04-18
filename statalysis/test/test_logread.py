@@ -29,10 +29,17 @@ class TestProcessReader(TestCase):
         logFiles = [
             os.path.join(moduleDir(), 'log', 'access.log')]
         self.rules = {'BotMatcher': RULES_BOT}
-        self.r = logread.ProcessReader(
-            {}, vhost="evolvingoutofeden.com")
+        self.r = logread.ProcessReader({})
         self.m = self.r.m
 
+    def uaMatcher(self, ip, ua):
+        return ua.endswith('bot')
+
+    def botMatcher(self, ip, url):
+        if ".php" in url:
+            return True
+        return False
+        
     @contextmanager
     def matcher(self, name):
         x = getattr(self.m, name)
@@ -44,14 +51,6 @@ class TestProcessReader(TestCase):
         def mr(*args):
             stuff = stuffBase + list(args)
             return self.r.makeRecord(stuff, alreadyParsed=True)
-
-        def uaMatcher(ip, ua):
-            return ua.endswith('bot')
-
-        def botMatcher(ip, url):
-            if ".php" in url:
-                return True
-            return False
 
         # Empty line
         self.assertNone(self.r.makeRecord(""))
@@ -79,11 +78,10 @@ class TestProcessReader(TestCase):
             stuffBase = stuffBase[:-2]
             tail = [200, "-", "Mozilla innocent browser/1.2"]
             # ... innocent URL
-            self.assertNotNone(mr("/", *tail))
-            self.assertEqual(self.ipList, [])
+            self.assertIsInstance(mr("/", *tail), tuple)
             # ... malicious URL
-            self.assertNone(mr("/foo/wp-login.php", *tail))
-            self.assertEqual(self.ipList, [ip1])
+            result = mr("/foo/wp-login.php", *tail)
+            self.assertEqual(result, ip1)
         # Innocent record
         dtTest, record = mr(
             "/index.html", 302,
@@ -107,20 +105,14 @@ class TestReader(TestCase):
        
     @defer.inlineCallbacks
     def test_run(self):
-        result = yield self.r.run().addErrback(self.oops)
-        if isinstance(result, failure.Failure):
-            result.raiseException()
-        else:
-            ipList = result
-            self.assertIsInstance(ipList, list)
-            self.assertTrue(len(ipList) > 1)
-            Ne = 2
-            N = yield self.t.hitsForIP("98.190.155.57")
-            # Why do I get N=0?
-            msg = "Expected at least {:d} records, got {:d}".format(Ne, N)
-            self.assertGreater(N, Ne, msg)
-            yield self.r.done()
-
+        ipList = yield self.r.run().addErrback(self.oops)
+        self.assertIsInstance(ipList, list)
+        self.assertTrue(len(ipList) > 1)
+        Ne = 2
+        N = yield self.t.hitsForIP("207.216.252.13")
+        msg = "Expected at least {:d} records, got {:d}".format(Ne, N)
+        self.assertGreater(N, Ne, msg)
+        yield self.r.shutdown()
         
 
             

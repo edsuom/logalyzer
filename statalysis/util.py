@@ -9,6 +9,7 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 import re, os, os.path
 from collections import deque
+from contextlib import contextmanager
 
 from twisted.internet import reactor, defer
 
@@ -326,4 +327,34 @@ class Base(object):
         path = os.path.abspath(os.path.join(self.myDir, fileName))
         self.checkPath(path)
         return path
-    
+
+    def cleak(self, f, *args, **kw):
+        """
+        For debugging memory leaks. Calls the deferred-returning function
+        f (with any args, kw), recording changes made to the heap
+        during the call. Prints a warning-level message about the heap
+        every call, and stops with the debugger after 'stopInterval'
+        calls, if defined.
+
+        Returns a deferred that fires with the call result, which
+        should make this indistinguishable from the original call.
+        """
+        def done(result):
+            if not hasattr(self, 'msgInterval') or \
+               self._checkLeakStuff[0] % self.msgInterval == 0:
+                hpd = self._checkLeakStuff[1].heap()
+                self.msgWarning("Heap:\n{}", hpd)
+                self.msgWarning("Heap (byrcs):\n{}", hpd.byrcs)
+                self.msgWarning("Heap (byrcs[0].byvia):\n{}", hpd.byrcs[0].byvia)
+            if hasattr(self, 'stopInterval') and \
+               self._checkLeakStuff[0] >= self.stopInterval:
+                import pdb
+                pdb.set_trace()
+            return result
+        
+        if not hasattr(self, '_checkLeakStuff'):
+            from guppy import hpy
+            self._checkLeakStuff = [0, hpy()]
+        self._checkLeakStuff[1].setrelheap()
+        self._checkLeakStuff[0] += 1
+        return f(*args, **kw).addCallback(done)
