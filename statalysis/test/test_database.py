@@ -205,7 +205,7 @@ class TestTransactor(TestCase):
     @defer.inlineCallbacks
     def test_getID(self):
         def nowRun(null, name, value):
-            return self.t._getID(name, value).addCallback(
+            return self.t.getID(name, value).addCallback(
                 lambda ID: IDLists[value].append(ID))
         N = 4
         self.t.cacheSetup()

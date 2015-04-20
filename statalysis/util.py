@@ -328,6 +328,7 @@ class Base(object):
         self.checkPath(path)
         return path
 
+    _checkLeakStuff = []
     def cleak(self, f, *args, **kw):
         """
         For debugging memory leaks. Calls the deferred-returning function
@@ -340,21 +341,30 @@ class Base(object):
         should make this indistinguishable from the original call.
         """
         def done(result):
-            if not hasattr(self, 'msgInterval') or \
-               self._checkLeakStuff[0] % self.msgInterval == 0:
+            k = self._checkLeakStuff[0]
+            if not hasattr(self, 'msgInterval') or k % self.msgInterval == 0:
                 hpd = self._checkLeakStuff[1].heap()
-                self.msgWarning("Heap:\n{}", hpd)
+                print "\n"
+                self.msgWarning("Heap after {:d} intervals:\n{}", k, hpd)
                 self.msgWarning("Heap (byrcs):\n{}", hpd.byrcs)
-                self.msgWarning("Heap (byrcs[0].byvia):\n{}", hpd.byrcs[0].byvia)
-            if hasattr(self, 'stopInterval') and \
-               self._checkLeakStuff[0] >= self.stopInterval:
+                # Particular focus
+                for kk in xrange(2):
+                    self.msgWarning(
+                        "Heap (byrcs[{:d}].byvia):\n{}",
+                        kk, hpd.byrcs[kk].byvia)
+            if hasattr(self, 'stopInterval') and k >= self.stopInterval:
                 import pdb
                 pdb.set_trace()
             return result
         
-        if not hasattr(self, '_checkLeakStuff'):
+        if not self._checkLeakStuff:
             from guppy import hpy
-            self._checkLeakStuff = [0, hpy()]
-        self._checkLeakStuff[1].setrelheap()
+            self._checkLeakStuff.extend([0, hpy()])
+            self._checkLeakStuff[1].setrelheap()
         self._checkLeakStuff[0] += 1
         return f(*args, **kw).addCallback(done)
+
+    def gleak(self, f, *args, **kw):
+        import gc
+        gc.set_debug(gc.DEBUG_LEAK)
+    

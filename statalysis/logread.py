@@ -191,10 +191,10 @@ class Reader(KWParse, Base):
         self.parseKW(kw)
         self.consumers = []
         self.fileNames = logFiles
-        # Two connections for each concurrent parsing of a logfile,
-        # one for each transaction and one for the iterations that
-        # are done for that transaction.
-        N_pool = 2*max([1, 2*self.N_processes])
+        # Three connections for each concurrent parsing of a logfile:
+        # one for each transaction, two for the iterations that may be
+        # done during that transaction.
+        N_pool = 3*max([1, 2*self.N_processes])
         from records import RecordKeeper
         self.rk = RecordKeeper(
             dbURL, N_pool,

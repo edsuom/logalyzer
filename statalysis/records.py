@@ -24,8 +24,8 @@ class ProcessConsumer(Base):
     """
     implements(IConsumer)
 
-    msgInterval = 1000
-    stopInterval = 5000
+    msgInterval = 2000
+    stopInterval = 100000
     
     def __init__(
             self, recordKeeper, fileName, msgID=None, verbose=False, gui=None):
@@ -83,7 +83,7 @@ class ProcessConsumer(Base):
             # memory leak debugging
             #self.rk.purgeIP(x)
             pass
-            # With both disabled, usage was VM=316MB, RM=111MB
+            # With both disabled, usage was file; VM=316MB, RM=111MB
             # No worse with this enabled
         else:
             # Writing records can take long enough to pause the
@@ -93,7 +93,8 @@ class ProcessConsumer(Base):
             dt, record = x
             # DEBUG: Major memory leak here
             self.producer.pauseProducing()
-            self.cleak(self.rk.addRecord, dt, record).addCallbacks(done, self.oops)
+            self.cleak(
+                self.rk.addRecord, dt, record).addCallbacks(done, self.oops)
             #self.rk.addRecord(dt, record).addCallbacks(done, self.oops)
 
     def stopProduction(self):

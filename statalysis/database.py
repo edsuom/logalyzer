@@ -153,17 +153,6 @@ class Transactor(AccessBroker, util.Base):
         for name in self.indexedValues:
             self.cm.new(name)
             self.cachedValues[name] = {}
-
-    def _pendingID(self, name, value, d=None, clear=False):
-        if not hasattr(self, '_pendingIDs'):
-            self._pendingIDs = {}
-        if name not in self._pendingIDs:
-            self._pendingIDs[name] = {}
-        if clear:
-            self._pendingIDs[name].pop(value, None)
-        elif d is None:
-            return self._pendingIDs[name].get(value, None)
-        self._pendingIDs[name][value] = d
     
     @defer.inlineCallbacks
     def startup(self):
@@ -237,6 +226,7 @@ class Transactor(AccessBroker, util.Base):
         col = self.entries.c
         return self.callWhenRunning(run)
 
+    @defer.inlineCallbacks
     def setRecord(self, dt, record):
         """
         Adds all needed database entries for the supplied record at the
@@ -246,18 +236,15 @@ class Transactor(AccessBroker, util.Base):
         indicating if a new entry was added, and the integer ID of the
         new or existing entry.
         """
-        def gotIDs(IDs):
-            values.extend(IDs)
-            return self.setEntry(dt, values)
-            
         if not hasattr(self, 'cm'):
             self.cacheSetup()
         # Build list of values and indexed-value IDs
         values = [record[x] for x in self.directValues]
-        dList = [
-            self._getID(name, record[name])
-            for name in self.indexedValues]
-        return defer.gatherResults(dList).addCallback(gotIDs)
+        for name in self.indexedValues:        
+            ID = yield self.getID(name, record[name])
+            values.append(ID)
+        result = yield self.setEntry(dt, values)
+        defer.returnValue(result)
 
     def getRecords(self, dt):
         """
@@ -437,15 +424,14 @@ class Transactor(AccessBroker, util.Base):
         table = getattr(self, name)
         if not self.s("s_{}".format(name)):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
-        row = self.s().execute(value=value).first()
-        if row:
-            ID = row[0]
-        else:
+        ID = self.s().execute(value=value).scalar()
+        if ID is None:
             rp = table.insert().execute(value=value)
             ID = rp.lastrowid
+            rp.close()
         return ID
 
-    def _getID(self, name, value):
+    def getID(self, name, value):
         """
         Returns a deferred to the unique ID for the named value in the
         supplied record dict, looked up from the appropriate
@@ -461,6 +447,10 @@ class Transactor(AccessBroker, util.Base):
             self._pendingID(name, value, clear=True)
             return ID
 
+        # DEBUG: Disabled all the caching stuff for memory leak debugging
+        #----------------------------------------------------------------------
+        return self.setNameValue(name, value[:self.valueLength], niceness=-15)
+        #----------------------------------------------------------------------
         valueDict = self.cachedValues[name]
         # Truncate any overly long values now, before they cause any
         # complications in the DB check or insertion
@@ -489,6 +479,17 @@ class Transactor(AccessBroker, util.Base):
             self.oops, "Getting ID for '{}' value '{}'", name, value)
         return d
 
+    def _pendingID(self, name, value, d=None, clear=False):
+        if not hasattr(self, '_pendingIDs'):
+            self._pendingIDs = {}
+        if name not in self._pendingIDs:
+            self._pendingIDs[name] = {}
+        if clear:
+            self._pendingIDs[name].pop(value, None)
+        elif d is None:
+            return self._pendingIDs[name].get(value, None)
+        self._pendingIDs[name][value] = d
+        
     @transact
     def _getValuesFromIDs(self, IDs):
         """
@@ -502,7 +503,7 @@ class Transactor(AccessBroker, util.Base):
             with self.selex(cols.value) as sh:
                 sh.where(cols.id == ID)
                 rp = sh()
-                result[name] = rp.first()[0]
+                result[name] = rp.scalar()
         return result
 
 
