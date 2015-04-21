@@ -24,7 +24,7 @@ class ProcessConsumer(Base):
     """
     implements(IConsumer)
 
-    msgInterval = 2000
+    msgInterval = 10000
     stopInterval = 100000
     
     def __init__(
@@ -36,6 +36,7 @@ class ProcessConsumer(Base):
         self.msgID = msgID
         self.verbose = verbose
         self.gui = gui
+        self.dt = DeferredTracker()
     
     def registerProducer(self, producer, streaming):
         if hasattr(self, 'producer'):
@@ -48,6 +49,8 @@ class ProcessConsumer(Base):
         if self.msgID:
             self.rk.msgBody(
                 "Process now loading file {}", self.fileName, ID=self.msgID)
+        self.dProducer = defer.Deferred()
+        self.dt.put(self.dProducer)
     
     def unregisterProducer(self):
         del self.producer
@@ -61,8 +64,9 @@ class ProcessConsumer(Base):
             self.rk.fileStatus(
                 self.fileName, "Done: {:d}/{:d}", self.N_added, self.N_parsed)
             del self.rk
+        self.dProducer.callback(None)
 
-    def write(self, x):
+    def write(self, data):
         def done(wasAdded):
             if hasattr(self, 'producer'):
                 self.producer.resumeProducing()
@@ -77,9 +81,9 @@ class ProcessConsumer(Base):
 
         if not hasattr(self, 'rk'):
             return
-        if isinstance(x, str):
+        if isinstance(data, str):
             # No need to pause producer for a mere IP address
-            self.rk.purgeIP(x)
+            d = self.rk.purgeIP(data)
             # With both disabled, usage was file; VM=316MB, RM=111MB
             # No worse with this enabled
         else:
@@ -88,15 +92,20 @@ class ProcessConsumer(Base):
             # queue's memory usage from ballooning with a backlog of
             # pending records.
             self.producer.pauseProducing()
-            # DEBUG: Major memory leak here
-            #self.cleak(
-            #    self.rk.addRecord, *x).addCallbacks(done, self.oops)
-            self.rk.addRecord(*x).addCallbacks(done, self.oops)
+
+            # Major memory leak here: Simply running the callback with
+            # defer.succeed(False) still adds a little over 5,000 bytes per
+            # record parsed to the memory usage.
+            #d = self.rk.addRecord(*data).addCallbacks(done, self.oops)
+            d = defer.succeed(False).addCallback(done)
+        self.dt.put(d)
 
     def stopProduction(self):
         del self.rk
+        self.dShutdown = defer.Deferred()
         if hasattr(self, 'producer'):
             self.producer.stopProducing()
+        return self.dt.deferToAll()
             
                 
 class RecordKeeper(Base):
@@ -117,7 +126,6 @@ class RecordKeeper(Base):
         # ---------------------------------------------------------------------
         # List of IP addresses purged during this session
         self.ipList = []
-        self.dt = DeferredTracker()
         self.t = database.Transactor(
             dbURL, pool_size=N_pool, verbose=echo, echo=echo)
         self.verbose = verbose
@@ -129,13 +137,22 @@ class RecordKeeper(Base):
             self.ipm = ipm
             self.msgBody("{:d} IP addresses", len(ipm), ID=ID)
         ID = self.msgHeading("Preloading IP Matcher from DB")
-        d = self.t.callWhenRunning(
+        return self.t.callWhenRunning(
             self.t.preload).addCallbacks(done, self.oops)
-        return self.dt.put(d)
         
     def shutdown(self):
-        return self.dt.deferToAll().addCallback(lambda _: self.t.shutdown())
+        return self.t.shutdown()
 
+    def consumerFactory(self, fileName, msgID=None):
+        """
+        Constructs and returns a reference to a new L{ProcessConsumer}
+        that obtains nasty IP addresses and new records from a process
+        parsing a particular logfile.
+        """
+        return ProcessConsumer(
+            self, fileName, msgID=msgID, verbose=self.verbose, gui=self.gui)
+        #verbose=self.info)
+    
     def fileInfo(self, *args):
         """
         See L{database.Transactor.fileInfo}
@@ -150,33 +167,29 @@ class RecordKeeper(Base):
         addresses can be provided. Any further adds from this IP are
         ignored.
 
-        If the database is to be updated, adds the deferred from that
-        transaction to my DeferredTracker. Returns the deferred, too,
-        but you can ignore it.
-
+        Returns a deferred that fires when the database has been
+        updated, or immediately if no database transaction is needed.
         """
         def donePurging(N):
             self.msgBody(
-                "Purged {:d} DB entries for IP {}",
-                N, ip, ID=ID)
+                "Purged {:d} DB entries for IP {}", N, ip, ID=ID)
 
         if ip in self.ipList:
             # This IP address was already purged during this session
-            return
+            return defer.succeed(None)
         # Add to this session's purge (and ignore) list
         self.ipList.append(ip)
         if not self.ipm(ip):
             # This IP address isn't in the database; nothing to purge.
-            return
+            return defer.succeed(None)
         # The in-database IP matcher says it's in the database so it
         # needs to be removed...
         self.ipm.removeIP(ip)
         # ...though the actual DB transaction is very low priority
         # because our IP matcher was just updated
         ID = self.msgHeading("Purging IP address {}", ip)
-        d = self.t.purgeIP(ip, niceness=15)
-        d.addCallbacks(donePurging, self.oops)
-        return self.dt.put(d)
+        return self.t.purgeIP(
+            ip, niceness=15).addCallbacks(donePurging, self.oops)
 
     def addRecord(self, dt, record):
         """
@@ -187,29 +200,16 @@ class RecordKeeper(Base):
         same second will be viewed as a single one. That shouldn't be
         an issue.
         
-        Adds the deferred from the DB transaction to my
-        DeferredTracker and returns it. It will fire with a Bool
-        indicating if a new entry was added.
+        Returns a deferred that fires with a Bool indicating if a new
+        entry was added to the database.
         """
         ip = record['ip']
         if ip in self.ipList:
             # Ignore this, it's from a purged IP address
             return defer.succeed(False)
         self.ipm.addIP(ip)
-        d = self.t.setRecord(dt, record)
-        d.addErrback(self.oops)
-        return self.dt.put(d)
+        return self.t.setRecord(dt, record).addErrback(self.oops)
 
-    def consumerFactory(self, fileName, msgID=None):
-        """
-        Constructs and returns a reference to a new L{ProcessConsumer}
-        that obtains nasty IP addresses and new records from a process
-        parsing a particular logfile.
-        """
-        return ProcessConsumer(
-            self, fileName, msgID=msgID, verbose=self.verbose, gui=self.gui)
-        #verbose=self.info)
-    
     def getNewIPs(self):
         """
         Returns a list of purged IP addresses that have been added since

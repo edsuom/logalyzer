@@ -171,6 +171,7 @@ class Transactor(AccessBroker, util.Base):
         yield self.table(
             'bad_ip',
             SA.Column('ip', SA.String(15), primary_key=True),
+            SA.Column('purged', SA.Boolean),
         )
         yield self.table(
             'files',
@@ -230,9 +231,14 @@ class Transactor(AccessBroker, util.Base):
         # Build list of values and indexed-value IDs
         values = [record[x] for x in self.directValues]
         for name in self.indexedValues:
-            ID = yield self.getID(name, record[name])
+            ID = yield defer.succeed(1)
+            #ID = yield self.getID(name, record[name])
             values.append(ID)
-        result = yield self.setEntry(dt, values)
+        # With this next line commented out and result = False
+        # instead, the memory leak still persists. CPU time for the
+        # main process was 66%.
+        result = False
+        #result = yield self.setEntry(dt, values)
         defer.returnValue(result)
 
     def getRecords(self, dt):

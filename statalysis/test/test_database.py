@@ -253,7 +253,7 @@ class TestTransactor(TestCase):
         self.t.ipm = database.IPMatcher()
         firstRecord = RECORDS[dt1][0]
         # Set once and check what we get is what we set
-        wi = yield self.t.setRecord(dt1, firstRecord)
+        wi = yield self.t.setRecord((dt1, firstRecord))
         # Was inserted
         self.assertTrue(wi)
         records = yield self.t.getRecords(dt1)
@@ -262,7 +262,7 @@ class TestTransactor(TestCase):
         # Set again with slight difference
         modRecord = firstRecord.copy()
         modRecord['ua'] = "Foo Browser/1.2"
-        wi = yield self.t.setRecord(dt1, modRecord)
+        wi = yield self.t.setRecord((dt1, modRecord))
         # Was inserted
         self.assertTrue(wi)
         records = yield self.t.getRecords(dt1)

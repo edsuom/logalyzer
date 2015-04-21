@@ -206,10 +206,16 @@ class Reader(KWParse, Base):
             ignoreSecondary=self.ignoreSecondary)
         # A lock for getting shutdown done right
         self.lock = asynqueue.DeferredLock()
-        self.lock.addStopper(self.rk.shutdown)
         reactor.addSystemEventTrigger(
             'before', 'shutdown', self.shutdown)
 
+    def isRunning(self):
+        if hasattr(self, '_shutdownFlag'):
+            return False
+        if hasattr(self, 'pq'):
+            return self.pq.isRunning()
+        return False
+    
     def getMatchers(self, rules):
         result = {}
         for matcherName, ruleList in rules.iteritems():
@@ -237,10 +243,25 @@ class Reader(KWParse, Base):
         """
         Call this to shut everything down.
         """
+        if hasattr(self, '_shutdownFlag'):
+            return defer.succeed(None)
+        # Signal dispatch loop to quit
+        self._shutdownFlag = None
         self.msgHeading("Shutting down...")
-        for consumer in self.consumers:
-            consumer.stopProduction()
-        return self.lock.stop()
+        # RecordKeeper and its transaction queue gets shut down
+        # *after* process queue
+        self.lock.addStopper(self.rk.shutdown)
+        # Delete my consumers and have them tell their producers to
+        # quit
+        dList = []
+        while self.consumers:
+            dList.append(self.consumers.pop(0).stopProduction())
+        # Wait for (1) producers to quit, (2) dispatch loop to quit,
+        # (3) process queue to shut down, and (4) record keeper to
+        # shut down. Items 3 and 4 are done via stopper functions
+        # added (in order) to the lock.
+        return defer.DeferredList(dList).addCallback(
+            lambda _: self.lock.stop())
 
     @defer.inlineCallbacks
     def run(self, updateOnly=False):
@@ -300,6 +321,9 @@ class Reader(KWParse, Base):
             # "Wait" for the number of concurrent parsings to fall
             # back to the limit
             yield ds.acquire()
+            # If not running, break out of the loop
+            if not self.isRunning():
+                break
             # References to the deferreds from dispatch calls are
             # stored in the process queue, and we wait for their
             # results.
@@ -308,8 +332,9 @@ class Reader(KWParse, Base):
             dList.append(d)
         
         yield defer.DeferredList(dList)
-        self.lock.release()
         ipList = self.rk.getNewIPs()
         self.msgBody(
             "Identified {:d} misbehaving IP addresses", len(ipList))
         defer.returnValue(ipList)
+        self.lock.release()
+

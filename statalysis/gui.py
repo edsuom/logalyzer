@@ -7,9 +7,12 @@ Copyright (C) 2014-2015 Tellectual LLC
 
 """
 
-import math
+import sys, math
 
 from twisted.internet import reactor, defer
+import twisted.python.log
+
+from asynqueue import Info
 
 import urwid as u
 from urwid.raw_display import Screen
@@ -271,6 +274,35 @@ class Files(u.GridFlow):
         row.done()
         row.setStatus(textProto.format(*args))
 
+
+class StdSubstitute(object):
+    """
+    Substitute sink for stdout and stderr when the GUI is used, to
+    avoid garbage characters messing up the terminal. Also acts as a
+    Twisted log observer.
+    """
+    def __init__(self, name, gui):
+        self.name = name
+        self.gui = gui
+    
+    def write(self, text):
+        self.gui.warning("{}: {}", self.name, text)
+    def writelines(self, lines):
+        self.write("\n".join(lines))
+    def flush(self):
+        self.gui.update()
+    def close(self):
+        pass
+    def __call__(self, logEvent):
+        text = "\n".join(logEvent['message'])
+        if logEvent['isError']:
+            if 'failure' in logEvent:
+                text += "\n{}".format(
+                    Info().aboutFailure(logEvent['failure']))
+            self.gui.error("Twisted Error: {}", text)
+        else:
+            self.gui.warning("Twisted Message: {}", text)
+        
     
 class GUI(object):
     """
@@ -312,9 +344,7 @@ class GUI(object):
         """
         def possiblyQuit(key):
             if key in ('q', 'Q'):
-                # NOTE: The warning doesn't show up when program
-                # hangs, but does quit.
-                reactor.callFromThread(reactor.stop)
+                reactor.callFromThread(self.stop)
                 
         # The top-level widgets
         self.m = Messages()
@@ -331,6 +361,9 @@ class GUI(object):
         self.loop = u.MainLoop(
             main, screen=self.screen,
             unhandled_input=possiblyQuit, event_loop=eventLoop)
+        #sys.stdout = StdSubstitute('STDOUT', self)
+        sys.stderr = observer = StdSubstitute('STDERR', self)
+        twisted.python.log.addObserver(observer)
         reactor.addSystemEventTrigger('before', 'shutdown', self.stop)
         self.running = True
         self.loop.start()
@@ -351,19 +384,20 @@ class GUI(object):
             self.f.updateWidth(width)
         self.loop.draw_screen()
 
+    @defer.inlineCallbacks
     def stop(self):
         """
         Runs stopper functions and tears down the GUI display just before
         the reactor is stopped.
         """
-        def cb(null):
+        if self.running and not hasattr(self, '_shutdownFlag'):
+            self._shutdownFlag = None
+            self.warning("Stopping...")
+            while self.stoppers:
+                yield defer.maybeDeferred(self.stoppers.pop(0))
+            self.running = False
             self.screen.unhook_event_loop(self.loop)
             self.loop.stop()
-            self.running = False
-        
-        self.warning("Stopping...")
-        dList = [defer.maybeDeferred(func) for func in self.stoppers]
-        return defer.DeferredList(dList).addBoth(cb)
     
     def msgHeading(self, textProto, *args):
         """

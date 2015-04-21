@@ -110,7 +110,7 @@ LICENSE
 Copyright (C) 2015 Tellectual LLC
 """
 
-from twisted.internet import reactor
+from twisted.internet import reactor, defer
 
 from util import Base
 from writer import IPWriter
@@ -246,28 +246,23 @@ class Recorder(Base):
         Callback to process an ipList returned from my reader.
         """
         # Save the IP addresses from purges if that option set
-        filePath = self.opt['s']
-        if filePath:
-            w = IPWriter()
-            w.writeIPs(ipList, filePath)
-        return self.reader.shutdown()
-        
+
+    @defer.inlineCallbacks
     def load(self):
         """
         This is where it all happens.
         """
-        def allDone(null):
-            self.msgHeading("All Done!")
-            if self.gui:
-                self.msgBody("Press 'q' to quit.")
-            else:
-                reactor.stop()
-
         # Almost all of my time is spent in this next line
-        d = self.reader.run(self.opt['t'])
-        d.addCallbacks(self._doneReading, self.oops)
-        d.addCallbacks(allDone, self.oops)
-        return d
+        ipList = yield self.reader.run(self.opt['t']).addErrback(self.oops)
+        filePath = self.opt['s']
+        if filePath:
+            w = IPWriter()
+            w.writeIPs(ipList, filePath)
+        self.msgHeading("All Done!")
+        if self.gui and self.reader.isRunning():
+            self.msgBody("Press 'q' to quit.")
+        else:
+            reactor.stop()
 
     def consolidate(self, outPath):
         """
