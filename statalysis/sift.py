@@ -84,6 +84,10 @@ class IPMatcher(MatcherBase):
         Call this with an IP address (string format) to add it to my list
         if it's not already there.
         """
+        # Clear the misses cache of this IP
+        if not ignoreCache:
+            self.cm.clear(1, ip)
+        # Add the hash if it's not already in my list
         ipHash = self.dqToHash(ip)
         if not self.N:
             # The first one is special
@@ -99,10 +103,6 @@ class IPMatcher(MatcherBase):
         self.N += 1
         # Insert new IP hash where it would have been
         self.ipHashes.insert(k, ipHash)
-        if ignoreCache:
-            return
-        # Clear the misses cache of this IP
-        self.cm.clear(1, ip)
 
     def removeIP(self, ip):
         """

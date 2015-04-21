@@ -272,15 +272,19 @@ class Reader(KWParse, Base):
                 # processes to have it feed the consumer with
                 # misbehaving IP addresses and filtered records
                 return self.pq.call(
-                    self.pr, filePath, consumer=consumer).addCallback(
-                        self.consumers.remove)
+                    self.pr, filePath, consumer=consumer).addCallback(done)
+
+            def done(consumer):
+                self.consumers.remove(consumer)
+                return self.rk.fileInfo(fileName, dtFile, consumer.N_parsed)
 
             filePath = self.pathInDir(fileName)
             ID = self.msgHeading("Logfile {}...", fileName)
+            dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
             if updateOnly:
-                dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
                 self.msgBody("File datetime: {}", dtFile, ID=ID)
-                return self.rk.fileInfo(fileName).addCallbacks(gotInfo, self.oops)
+                return self.rk.fileInfo(
+                    fileName).addCallbacks(gotInfo, self.oops)
             return load()
 
         dList = []

@@ -60,14 +60,15 @@ class ProcessConsumer(Base):
                     self.N_added, self.N_parsed, ID=self.msgID)
             self.rk.fileStatus(
                 self.fileName, "Done: {:d}/{:d}", self.N_added, self.N_parsed)
+            del self.rk
 
     def write(self, x):
-        def done(result):
+        def done(wasAdded):
             if hasattr(self, 'producer'):
                 self.producer.resumeProducing()
             if hasattr(self, 'rk'):
                 self.N_parsed += 1
-                if result[0]:
+                if wasAdded:
                     self.N_added += 1
                 if not self.N_parsed % 10:
                     self.rk.fileProgress(self.fileName)
@@ -78,11 +79,7 @@ class ProcessConsumer(Base):
             return
         if isinstance(x, str):
             # No need to pause producer for a mere IP address
-
-            # DEBUG: Disabled to avoid need for lengthy preload while
-            # memory leak debugging
-            #self.rk.purgeIP(x)
-            pass
+            self.rk.purgeIP(x)
             # With both disabled, usage was file; VM=316MB, RM=111MB
             # No worse with this enabled
         else:
@@ -90,12 +87,11 @@ class ProcessConsumer(Base):
             # producer until it's done. That keeps my DB transaction
             # queue's memory usage from ballooning with a backlog of
             # pending records.
-            dt, record = x
-            # DEBUG: Major memory leak here
             self.producer.pauseProducing()
-            self.cleak(
-                self.rk.addRecord, dt, record).addCallbacks(done, self.oops)
-            #self.rk.addRecord(dt, record).addCallbacks(done, self.oops)
+            # DEBUG: Major memory leak here
+            #self.cleak(
+            #    self.rk.addRecord, *x).addCallbacks(done, self.oops)
+            self.rk.addRecord(*x).addCallbacks(done, self.oops)
 
     def stopProduction(self):
         del self.rk
@@ -133,10 +129,8 @@ class RecordKeeper(Base):
             self.ipm = ipm
             self.msgBody("{:d} IP addresses", len(ipm), ID=ID)
         ID = self.msgHeading("Preloading IP Matcher from DB")
-        # DEBUG
-        d = self.t.waitUntilRunning()
-        #d = self.t.callWhenRunning(
-        #    self.t.preload).addCallbacks(done, self.oops)
+        d = self.t.callWhenRunning(
+            self.t.preload).addCallbacks(done, self.oops)
         return self.dt.put(d)
         
     def shutdown(self):
@@ -194,14 +188,14 @@ class RecordKeeper(Base):
         an issue.
         
         Adds the deferred from the DB transaction to my
-        DeferredTracker and returns it. It will fire with a 2-tuple: A
-        Bool indicating if a new entry was added, and the integer ID
-        of the new or existing entry, see
-        L{database.Transactor.setRecord}.
-
+        DeferredTracker and returns it. It will fire with a Bool
+        indicating if a new entry was added.
         """
-        # DEBUG
-        #self.ipm.addIP(record['ip'])
+        ip = record['ip']
+        if ip in self.ipList:
+            # Ignore this, it's from a purged IP address
+            return defer.succeed(False)
+        self.ipm.addIP(ip)
         d = self.t.setRecord(dt, record)
         d.addErrback(self.oops)
         return self.dt.put(d)

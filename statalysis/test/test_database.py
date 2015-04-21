@@ -86,23 +86,6 @@ class TestTransactor(TestCase):
                     yield self.t.sql("DROP TABLE {}".format(tableName))
             yield self.t.shutdown()
 
-    def test_pendingID(self):
-        pe = self.t._pendingID
-        names = ('alpha', 'bravo', 'charlie')
-        values = ('delta', 'foxtrot', 'golf')
-        for j, name in enumerate(names):
-            for k, value in enumerate(values):
-                d = defer.Deferred()
-                self.assertEqual(pe(name, value), None)
-                pe(name, value, d)
-                self.assertEqual(pe(name, value), d)
-                if j > 0:
-                    self.assertNotEqual(pe(names[j-1], value), d)
-                if k > 0:
-                    self.assertNotEqual(pe(name, values[k-1]), d)
-                pe(name, value, clear=True)
-                self.assertEqual(pe(name, value), None)
-
     @defer.inlineCallbacks
     def test_preload(self):
         # Write four dt-ip combos to DB
@@ -122,15 +105,18 @@ class TestTransactor(TestCase):
                 
     @defer.inlineCallbacks
     def test_matchingEntry(self):
+        # Since we're not doing preload, give the transactor an empty
+        # IP Matcher
+        self.t.ipm = database.IPMatcher()
         values = makeEntry(ip1, 200, False)
         # Should be none there yet
         ID = yield self.t.matchingEntry(dt1, values)
         self.assertNone(ID)
-        wi, ID1 = yield self.t.setEntry(dt1, values)
+        wi = yield self.t.setEntry(dt1, values)
         self.assertTrue(wi)
         # Now there should be
         ID = yield self.t.matchingEntry(dt1, values)
-        self.assertEqual(ID, ID1)
+        self.assertNotNone(ID)
         # A different dt doesn't match
         ID = yield self.t.matchingEntry(dt2, values)
         self.assertNone(ID)
@@ -147,22 +133,22 @@ class TestTransactor(TestCase):
         self.t.dtk = MockDTK(self.verbose)
         cm = self.t.dtk.callsMade
         values = makeEntry(ip1, 200, False)
+        # Since we're not doing preload, give the transactor an empty
+        # IP Matcher
+        self.t.ipm = database.IPMatcher()
 
         # New entry
-        wi, ID1 = yield self.t.setEntry(dt1, values)
+        wi = yield self.t.setEntry(dt1, values)
+        self.t.ipm.addIP(ip1)
         # Was inserted
         self.assertTrue(wi)
-        # Must be an integer ID
-        self.assertIsInstance(ID1, (int, long))
         # DTK was set, though not checked because still dtk_pending
         self.assertEqual(cm, [['set', dt1]])
                          
         # Duplicate entry
-        wi, ID2 = yield self.t.setEntry(dt1, values)
+        wi = yield self.t.setEntry(dt1, values)
         # Not inserted
         self.assertFalse(wi)
-        # Same as the other one
-        self.assertEqual(ID2, ID1)
         # DTK was neither checked nor set
         self.assertEqual(len(cm), 1)
 
@@ -170,21 +156,17 @@ class TestTransactor(TestCase):
         self.t.dtk.isPending(False)
         
         # Duplicate entry again
-        wi, ID2 = yield self.t.setEntry(dt1, values)
+        wi = yield self.t.setEntry(dt1, values)
         # Not inserted, same ID
         self.assertFalse(wi)
-        self.assertEqual(ID2, ID1)
         # DTK was check, not set
         self.assertEqual(len(cm), 2)
         self.assertEqual(cm[-1], ['check', dt1])
         
         # New entry: different dt, same values
-        wi, ID3 = yield self.t.setEntry(dt2, values)
+        wi = yield self.t.setEntry(dt2, values)
         # Was inserted
         self.assertTrue(wi)
-        # New ID
-        self.assertIsInstance(ID3, (int, long))
-        self.assertNotEqual(ID3, ID1)
         # DTK was checked and set
         self.assertEqual(len(cm), 4)
         self.assertEqual(cm[-2:], [['check', dt2], ['set', dt2]])
@@ -208,7 +190,6 @@ class TestTransactor(TestCase):
             return self.t.getID(name, value).addCallback(
                 lambda ID: IDLists[value].append(ID))
         N = 4
-        self.t.cacheSetup()
         someValues = ("foo", "bar-whatever", "/wasting-time forever")
         for name in self.t.indexedValues:
             dList = []
@@ -267,23 +248,23 @@ class TestTransactor(TestCase):
                 
     @defer.inlineCallbacks
     def test_setRecord(self):
+        # Since we're not doing preload, give the transactor an empty
+        # IP Matcher
+        self.t.ipm = database.IPMatcher()
         firstRecord = RECORDS[dt1][0]
         # Set once and check what we get is what we set
-        wi, ID1 = yield self.t.setRecord(dt1, firstRecord)
+        wi = yield self.t.setRecord(dt1, firstRecord)
         # Was inserted
         self.assertTrue(wi)
-        self.assertIsInstance(ID1, (int, long))
         records = yield self.t.getRecords(dt1)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0], firstRecord)
         # Set again with slight difference
         modRecord = firstRecord.copy()
         modRecord['ua'] = "Foo Browser/1.2"
-        wi, ID2 = yield self.t.setRecord(dt1, modRecord)
+        wi = yield self.t.setRecord(dt1, modRecord)
         # Was inserted
         self.assertTrue(wi)
-        self.assertIsInstance(ID2, (int, long))
-        self.assertNotEqual(ID2, ID1)
         records = yield self.t.getRecords(dt1)
         self.assertEqual(len(records), 2)
         self.assertIn(firstRecord, records)

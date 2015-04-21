@@ -143,17 +143,6 @@ class Transactor(AccessBroker, util.Base):
     colNames = directValues +\
                ["id_{}".format(x) for x in indexedValues]
 
-    def cacheSetup(self):
-        """
-        Sets up caches for values written to the indexed value tables
-        """
-        # We use huge caches because DB access is so slow
-        self.cm = util.CacheManager(200)
-        self.cachedValues = {}
-        for name in self.indexedValues:
-            self.cm.new(name)
-            self.cachedValues[name] = {}
-    
     @defer.inlineCallbacks
     def startup(self):
         # Primary key is an auto-incrementing index, which can be used
@@ -180,9 +169,8 @@ class Transactor(AccessBroker, util.Base):
                 unique_value=['value']
             )
         yield self.table(
-            'purge',
+            'bad_ip',
             SA.Column('ip', SA.String(15), primary_key=True),
-            SA.Column('purged', SA.Boolean),
         )
         yield self.table(
             'files',
@@ -214,13 +202,17 @@ class Transactor(AccessBroker, util.Base):
         def run():
             # IP matcher
             dIPM = load('ip', ipm.addIP, ignoreCache=True)
-            dIPM.addCallback(lambda _: ipm)
+            dIPM.addCallback(done)
             # DTK
             dDTK = load('dt', self.dtk.set)
             dDTK.addCallback(lambda _: self.dtk.isPending(False))
             # The caller only needs to wait for loading of the IP
             # matcher, not the DTK object
             return dIPM
+
+        def done(null):
+            self.ipm = ipm
+            return ipm
 
         ipm = IPMatcher()
         col = self.entries.c
@@ -232,15 +224,12 @@ class Transactor(AccessBroker, util.Base):
         Adds all needed database entries for the supplied record at the
         specified datetime.
 
-        Returns a deferred that fires with a 2-tuple: A Bool
-        indicating if a new entry was added, and the integer ID of the
-        new or existing entry.
+        Returns a deferred that fires with a Bool indicating if a new
+        entry was added.
         """
-        if not hasattr(self, 'cm'):
-            self.cacheSetup()
         # Build list of values and indexed-value IDs
         values = [record[x] for x in self.directValues]
-        for name in self.indexedValues:        
+        for name in self.indexedValues:
             ID = yield self.getID(name, record[name])
             values.append(ID)
         result = yield self.setEntry(dt, values)
@@ -275,6 +264,7 @@ class Transactor(AccessBroker, util.Base):
         returning the (deferred) number of rows that were matched and
         presumably deleted.
         """
+        self.bad_ip.insert().prefix_with("IGNORE").execute(ip=ip)
         with self.selex(self.entries.delete) as sh:
             sh.where(self.entries.c.ip == ip)
             result = sh().rowcount
@@ -288,7 +278,7 @@ class Transactor(AccessBroker, util.Base):
         cols = self.entries.c
         with self.selex(SA.func.count(cols.http)) as sh:
             sh.where(cols.ip == ip)
-            result = sh().first()[0]
+            result = sh().scalar()
         return result
 
     @transact
@@ -325,19 +315,6 @@ class Transactor(AccessBroker, util.Base):
     # -------------------------------------------------------------------------
         
     @transact
-    def getEntries(self, dt):
-        """
-        Returns the ID plus all of the columns after dt for one datetime
-        second of entries.
-        """
-        col = self.entries.c
-        if not self.s('s_entry'):
-            cList = ['id']
-            cList += [getattr(col, x) for x in self.colNames]
-            self.s(cList, col.dt == SA.bindparam('dt'))
-        return self.s().execute(dt=dt)
-
-    @transact
     def insertEntry(self, dt, values):
         """
         Inserts a DB entry for the specified datetime, using the supplied
@@ -356,7 +333,40 @@ class Transactor(AccessBroker, util.Base):
         for k, name in enumerate(self.colNames):
             kw[name] = values[k]
         rp = self.entries.insert().execute(**kw)
-        return rp.lastrowid
+        ID = rp.lastrowid
+        # Necessary?
+        rp.close()
+        return ID
+
+    @defer.inlineCallbacks
+    def setEntry(self, dt, values):
+        """
+        Adds a new entry to the database for the specified datetime
+        dt. See my colNames attribute for the six values you need to
+        supply.
+
+        Returns a deferred that fires with a Bool indicating if a new
+        entry was added
+        """
+        ID = None
+        # Check the lookup tree first
+        if self.dtk.isPending() or self.dtk.check(dt):
+            ip = values[0]
+            # There is at least one entry for this dt...
+            if self.ipm(ip):
+                # ...and an entry somewhere with this IP address, so
+                # check for an existing entry for this dt with
+                # identical values
+                ID = yield self.matchingEntry(dt, values)
+        # Will we be inserting a new entry?
+        if ID is None:
+            # Yes, do it now
+            self.dtk.set(dt)
+            wasInserted = True
+            yield self.insertEntry(dt, values)
+        else:
+            wasInserted = False
+        defer.returnValue(wasInserted)
 
     @defer.inlineCallbacks
     def matchingEntry(self, dt, values):
@@ -374,47 +384,40 @@ class Transactor(AccessBroker, util.Base):
             return ID
 
         ID = None
-        dr = yield self.getEntries(dt)
-        # TODO: Cache hashes of value combinations for recent dt
-        for d in dr:
-            theseValues = yield d
+        entries = yield self.getEntries(dt, asList=True)
+        # TODO: Cache hashes of value combinations for recent dt?
+        for theseValues in entries:
             ID = matchingValues()
             if ID is None:
                 continue
             # Yep, one was found, no new entry will be needed
-            dr.stop()
         defer.returnValue(ID)
-        
-    @defer.inlineCallbacks
-    def setEntry(self, dt, values):
-        """
-        Adds a new entry to the database for the specified datetime
-        dt. See my colNames attribute for the six values you need to
-        supply.
 
-        Returns a deferred that fires with a 2-tuple: A Bool
-        indicating if a new entry was added, and the integer ID of the
-        new or existing entry.
+    @transact
+    def getEntries(self, dt):
         """
-        # Check the lookup tree first
-        if self.dtk.isPending() or self.dtk.check(dt):
-            # There is at least one entry for this dt, so check for an
-            # existing entry with identical values
-            ID = yield self.matchingEntry(dt, values)
-        else:
-            # Fully loaded lookup tree says no entry, so we will be
-            # setting one
-            ID = None
-        # Will we be inserting a new entry?
-        if ID is None:
-            # Yes, do it now
-            self.dtk.set(dt)
-            wasInserted = True
-            ID = yield self.insertEntry(dt, values)
-        else:
-            wasInserted = False
-        defer.returnValue((wasInserted, ID))
-    
+        Returns the ID plus all of the columns after dt for one datetime
+        second of entries.
+        """
+        col = self.entries.c
+        if not self.s('s_entry'):
+            cList = ['id']
+            cList += [getattr(col, x) for x in self.colNames]
+            self.s(cList, col.dt == SA.bindparam('dt'))
+        return self.s().execute(dt=dt)
+
+    def getID(self, name, value):
+        """
+        Returns a deferred to the unique ID for the named value in the
+        supplied record dict.
+
+        Eliminating cache stuff from this doesn't seem to have slowed
+        things down at all.
+
+        Runs asynchronously; don't call from a transact method.
+        """
+        return self.setNameValue(name, value[:self.valueLength], niceness=-15)
+        
     @transact
     def setNameValue(self, name, value):
         """
@@ -430,66 +433,7 @@ class Transactor(AccessBroker, util.Base):
             ID = rp.lastrowid
             rp.close()
         return ID
-
-    def getID(self, name, value):
-        """
-        Returns a deferred to the unique ID for the named value in the
-        supplied record dict, looked up from the appropriate
-        indexed-value table if it's not in my cache for that name.
-        
-        Runs asynchronously; don't call from a transact method.
-        """
-        def done(ID):
-            # The order of the following two lines might be important
-            # if all transactions didn't run in a single thread. But
-            # they do.
-            valueDict[value] = ID
-            self._pendingID(name, value, clear=True)
-            return ID
-
-        # DEBUG: Disabled all the caching stuff for memory leak debugging
-        #----------------------------------------------------------------------
-        return self.setNameValue(name, value[:self.valueLength], niceness=-15)
-        #----------------------------------------------------------------------
-        valueDict = self.cachedValues[name]
-        # Truncate any overly long values now, before they cause any
-        # complications in the DB check or insertion
-        value = value[:self.valueLength]
-        if self.cm.check(name, value) and value in valueDict:
-            # Cached ID
-            return defer.succeed(valueDict[value])
-        # Get ID from DB for value, at high priority
-        dID = self._pendingID(name, value)
-        if dID is None:
-            discardedValue = self.cm.set(name, value)
-            if discardedValue in valueDict:
-                # This is important! Otherwise ALL values accumulate
-                # in memory, which can get HUGE!
-                del valueDict[discardedValue]
-            # No pending DB fetches now, so do one in its own 
-            # high-priority transaction
-            d = self.setNameValue(name, value, niceness=-15)
-            self._pendingID(name, value, d)
-            d.addCallback(done)
-        else:
-            d = defer.Deferred()
-            d.addCallback(lambda _: valueDict[value])
-            dID.chainDeferred(d)
-        d.addErrback(
-            self.oops, "Getting ID for '{}' value '{}'", name, value)
-        return d
-
-    def _pendingID(self, name, value, d=None, clear=False):
-        if not hasattr(self, '_pendingIDs'):
-            self._pendingIDs = {}
-        if name not in self._pendingIDs:
-            self._pendingIDs[name] = {}
-        if clear:
-            self._pendingIDs[name].pop(value, None)
-        elif d is None:
-            return self._pendingIDs[name].get(value, None)
-        self._pendingIDs[name][value] = d
-        
+       
     @transact
     def _getValuesFromIDs(self, IDs):
         """
