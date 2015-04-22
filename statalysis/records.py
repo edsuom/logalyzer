@@ -27,11 +27,10 @@ class ProcessConsumer(Base):
     msgInterval = 10000
     stopInterval = 100000
     
-    def __init__(
-            self, recordKeeper, fileName, msgID=None, verbose=False, gui=None):
+    def __init__(self, rk, fileName, msgID=None, verbose=False, gui=None):
         self.N_parsed = 0
         self.N_added = 0
-        self.rk = recordKeeper
+        self.rk = rk
         self.fileName = fileName
         self.msgID = msgID
         self.verbose = verbose
@@ -53,9 +52,12 @@ class ProcessConsumer(Base):
         self.dt.put(self.dProducer)
     
     def unregisterProducer(self):
+        if not hasattr(self, 'producer'):
+            return
         del self.producer
         self.msgBody(
-            "Added {:d} of {:d} records from producer", self.N_added, self.N_parsed)
+            "Added {:d} of {:d} records from producer",
+            self.N_added, self.N_parsed)
         if hasattr(self, 'rk'):
             if self.msgID:
                 self.rk.msgBody(
@@ -64,6 +66,9 @@ class ProcessConsumer(Base):
             self.rk.fileStatus(
                 self.fileName, "Done: {:d}/{:d}", self.N_added, self.N_parsed)
             del self.rk
+        if hasattr(self, 'gui'):
+            # Will this fix the GUI-only memory leak? Dunno.
+            del self.gui
         self.dProducer.callback(None)
 
     def write(self, data):
@@ -96,14 +101,17 @@ class ProcessConsumer(Base):
             # Major memory leak here: Simply running the callback with
             # defer.succeed(False) still adds a little over 5,000 bytes per
             # record parsed to the memory usage.
-            #d = self.rk.addRecord(*data).addCallbacks(done, self.oops)
-            d = defer.succeed(False).addCallback(done)
+            d = self.rk.addRecord(*data).addCallbacks(done, self.oops)
+            #d = defer.succeed(False).addCallback(done)
         self.dt.put(d)
 
-    def stopProduction(self):
+    def stopProduction(self, ID=None):
         del self.rk
         self.dShutdown = defer.Deferred()
         if hasattr(self, 'producer'):
+            self.msgBody(
+                "Stopping producer {} after {:d}/{:d} records",
+                repr(self.producer), self.N_added, self.N_parsed, ID=ID)
             self.producer.stopProducing()
         return self.dt.deferToAll()
             

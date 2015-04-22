@@ -49,18 +49,12 @@ class TestRecordKeeper(TestCase):
         
     @defer.inlineCallbacks
     def test_addRecord(self):
-        idList = []
         N_expected = [2, 1]
         for dt, theseRecords in RECORDS.iteritems():
             for thisRecord in theseRecords:
-                wasAdded, ID = yield self.rk.addRecord(dt, thisRecord)
+                wasAdded = yield self.rk.addRecord(dt, thisRecord)
                 self.assertTrue(wasAdded)
-                self.assertNotIn(ID, idList)
-                idList.append(ID)
         for k, ip in enumerate([ip1, ip2]):
             N = yield self.t.hitsForIP(ip)
             self.assertEqual(N, N_expected[k])
             self.assertTrue(self.rk.ipm(ip))
-            
-
-    

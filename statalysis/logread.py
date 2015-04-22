@@ -236,32 +236,34 @@ class Reader(KWParse, Base):
             q = asynqueue.ThreadQueue()
         else:
             q = asynqueue.ProcessQueue(self.N_processes)
-        self.lock.addStopper(q.shutdown)
         return q
-    
+
+    @defer.inlineCallbacks
     def shutdown(self):
         """
         Call this to shut everything down.
         """
-        if hasattr(self, '_shutdownFlag'):
-            return defer.succeed(None)
-        # Signal dispatch loop to quit
-        self._shutdownFlag = None
-        self.msgHeading("Shutting down...")
-        # RecordKeeper and its transaction queue gets shut down
-        # *after* process queue
-        self.lock.addStopper(self.rk.shutdown)
-        # Delete my consumers and have them tell their producers to
-        # quit
-        dList = []
-        while self.consumers:
-            dList.append(self.consumers.pop(0).stopProduction())
-        # Wait for (1) producers to quit, (2) dispatch loop to quit,
-        # (3) process queue to shut down, and (4) record keeper to
-        # shut down. Items 3 and 4 are done via stopper functions
-        # added (in order) to the lock.
-        return defer.DeferredList(dList).addCallback(
-            lambda _: self.lock.stop())
+        if not hasattr(self, '_shutdownFlag'):
+            # Signal dispatch loop to quit
+            self._shutdownFlag = None
+            ID = self.msgHeading("Shutting down...")
+            # Delete my consumers and "wait" for them to stop their
+            # producers
+            dList = []
+            while self.consumers:
+                dList.append(self.consumers.pop(0).stopProduction(ID))
+            yield defer.DeferredList(dList)
+            # "Wait" for lock
+            yield self.lock.acquireAndRelease()
+            # "Wait" for process queue to shut down
+            self.msgBody(
+                "Producers stopped, shutting down process queue", ID=ID)
+            yield self.pq.shutdown()
+            self.msgBody(
+                "Process queue stopped, shutting down recordkeeper", ID=ID)
+            # "Wait" for recordkeeper to shut down
+            yield self.rk.shutdown(ID)
+            self.msgBody("All done", ID=ID)
 
     @defer.inlineCallbacks
     def run(self, updateOnly=False):
@@ -311,6 +313,8 @@ class Reader(KWParse, Base):
         dList = []
         self.lock.acquire()
         self.pq = self.getQueue()
+        ID = self.msgHeading(
+            "Dispatching {:d} parsing jobs", len(self.fileNames))
         # We have at most two files being parsed concurrently for each
         # worker servicing my process queue
         ds = defer.DeferredSemaphore(min([self.N, 2*len(self.pq)]))
@@ -318,11 +322,15 @@ class Reader(KWParse, Base):
         yield self.rk.startup()
         # Dispatch files as permitted by the semaphore
         for fileName in self.fileNames:
+            if not self.isRunning():
+                self.lock.release()
+                break
             # "Wait" for the number of concurrent parsings to fall
             # back to the limit
             yield ds.acquire()
             # If not running, break out of the loop
             if not self.isRunning():
+                self.lock.release()
                 break
             # References to the deferreds from dispatch calls are
             # stored in the process queue, and we wait for their
@@ -330,11 +338,17 @@ class Reader(KWParse, Base):
             d = dispatch(fileName)
             d.addCallback(lambda _: ds.release())
             dList.append(d)
-        
-        yield defer.DeferredList(dList)
+            self.msgProgress(ID)
+        else:
+            # When filenames have all been dispatched without interruption
+            self.msgBody(
+                "Done dispatching, awaiting {:d} last results",
+                ds.tokens-ds.limit, ID=ID)
+            yield defer.DeferredList(dList)
         ipList = self.rk.getNewIPs()
         self.msgBody(
-            "Identified {:d} misbehaving IP addresses", len(ipList))
+            "Identified {:d} misbehaving IP addresses",
+            len(ipList))
         defer.returnValue(ipList)
-        self.lock.release()
+
 

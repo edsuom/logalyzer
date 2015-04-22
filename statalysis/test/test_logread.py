@@ -82,13 +82,16 @@ class TestProcessReader(TestCase):
             # ... malicious URL
             result = mr("/foo/wp-login.php", *tail)
             self.assertEqual(result, ip1)
-        # Innocent record
-        dtTest, record = mr(
-            "/index.html", 302,
-            "http://greatsite.com/", "Awesome browser/2.3")
-        self.assertEqual(dtTest, dtStuff)
-        self.assertIsInstance(record, dict)
-        self.assertTrue(len(record) > 5)
+        # Innocent record, still rejected until IP matcher cleared
+        args = (
+            "/index.html", 302, "http://greatsite.com/", "Awesome browser/2.3")
+        result = mr(*args)
+        self.assertNone(result)
+        self.r.ipm.removeIP(ip1)
+        result = mr(*args)
+        self.assertEqual(result[0], dtStuff)
+        self.assertIsInstance(result[1], dict)
+        self.assertTrue(len(result[1]) > 5)
 
 
 class TestReader(TestCase):

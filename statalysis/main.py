@@ -241,12 +241,6 @@ class Recorder(Base):
             verbose=self.verbose, info=self.opt['info'],
             warnings=self.opt['w'], gui=self.gui)
 
-    def _doneReading(self, ipList):
-        """
-        Callback to process an ipList returned from my reader.
-        """
-        # Save the IP addresses from purges if that option set
-
     @defer.inlineCallbacks
     def load(self):
         """

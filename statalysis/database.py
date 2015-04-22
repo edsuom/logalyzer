@@ -171,7 +171,7 @@ class Transactor(AccessBroker, util.Base):
         yield self.table(
             'bad_ip',
             SA.Column('ip', SA.String(15), primary_key=True),
-            SA.Column('purged', SA.Boolean),
+            SA.Column('purged', SA.Boolean, nullable=False),
         )
         yield self.table(
             'files',
@@ -183,6 +183,18 @@ class Transactor(AccessBroker, util.Base):
         self.pendingID = {}
         self.dtk = DTK()
 
+    @transact
+    def first(self):
+        """
+        Purges any entries with IP addresses in the "bad IP" table that
+        haven't been marked as purged already.
+        """
+        with self.selex(self.bad_ip.c.ip) as sh:
+            sh.where(self.bad_ip.c.purged == False)
+            ipList = sh().fetchall()
+        for ip in ipList:
+            self.purgeIP(ip)
+        
     # Public API
     # -------------------------------------------------------------------------
         
@@ -231,14 +243,12 @@ class Transactor(AccessBroker, util.Base):
         # Build list of values and indexed-value IDs
         values = [record[x] for x in self.directValues]
         for name in self.indexedValues:
-            ID = yield defer.succeed(1)
-            #ID = yield self.getID(name, record[name])
+            ID = yield self.getID(name, record[name])
             values.append(ID)
         # With this next line commented out and result = False
         # instead, the memory leak still persists. CPU time for the
-        # main process was 66%.
-        result = False
-        #result = yield self.setEntry(dt, values)
+        # main process was 66% of normal.
+        result = yield self.setEntry(dt, values)
         defer.returnValue(result)
 
     def getRecords(self, dt):
@@ -270,10 +280,16 @@ class Transactor(AccessBroker, util.Base):
         returning the (deferred) number of rows that were matched and
         presumably deleted.
         """
-        self.bad_ip.insert().prefix_with("IGNORE").execute(ip=ip)
         with self.selex(self.entries.delete) as sh:
             sh.where(self.entries.c.ip == ip)
             result = sh().rowcount
+        with self.selex(self.bad_ip.c.purged) as sh:
+            sh.where(self.bad_ip.c.ip == ip)
+            purged = sh().scalar()
+        if purged is None:
+            self.bad_ip.insert().execute(ip=ip, purged=True)
+        elif not purged:
+            self.bad_ip.update(self.bad_ip.c.ip==ip).execute(purged=True)
         return result
 
     @transact
@@ -391,11 +407,10 @@ class Transactor(AccessBroker, util.Base):
 
         ID = None
         entries = yield self.getEntries(dt, asList=True)
-        # TODO: Cache hashes of value combinations for recent dt?
         for theseValues in entries:
             ID = matchingValues()
-            if ID is None:
-                continue
+            if ID is not None:
+                break
             # Yep, one was found, no new entry will be needed
         defer.returnValue(ID)
 
