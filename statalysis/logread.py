@@ -43,8 +43,7 @@ class ProcessReader(KWParse):
         r'(\.(jpg|jpeg|png|gif|css|ico|woff|ttf|svg|eot\??))' +\
         r'|(robots\.txt|sitemap\.xml|googlecea.+\.html)$')
 
-    keyWords = (
-        ('vhost', None), ('exclude', []), ('ignoreSecondary', False))
+    keyWords = (('exclude', []), ('ignoreSecondary', False))
 
     def __init__(self, matchers, **kw):
         self.parseKW(kw)
@@ -129,15 +128,17 @@ class ProcessReader(KWParse):
         if self.m.uaMatcher(ip, ua):
             # Excluded UA string
             return
-        # OK, this is an approved record ... unless the vhost is
-        # excluded, and unless there is an IP address match
+        # OK, this is an approved record ... unless the requested
+        # vhost is bogus or there is an IP address match
         record = {
             'ip': ip, 'http': http,
             'url': url, 'ref': ref, 'ua': ua }
-        record['was_rd'], record['vhost'] = self.rc(vhost, ip, http)
-        if self.vhost and self.vhost != record['vhost']:
-            # Excluded vhost, so bail right now
-            return
+        record['was_rd'], vhost = self.rc(vhost, ip, http)
+        if self.m.vhostMatcher(ip, vhost):
+            # Excluded vhost, consider this IP misbehaving also
+            self.ipm.addIP(ip)
+            return ip
+        record['vhost'] = vhost
         # The last and by FAR the most time-consuming check is for
         # excluded networks. Only done if all other checks have
         # passed.
@@ -161,10 +162,28 @@ class ProcessReader(KWParse):
         strings (misbehaving IP addresses) and 2-tuples (datetime,
         record). Either type may be yielded at any time, and the
         caller must know what to do with them.
+
+        If the logfile does not specify a virtual host in CLF column
+        #2, you can specify a vhost for the entire file on the first
+        line. It can be prefixed with a comment symbol ("#" or ";" if
+        you wish).
         """
+        firstLine = True
         self.isRunning = True
         with self.file(fileName) as fh:
             for line in fh:
+                if firstLine:
+                    firstLine = False
+                    # Check first non-blank line for possible vhost
+                    # definition
+                    line = line.strip()
+                    if not line:
+                        continue
+                    match = re.match(r'^[#;]*\s*([\S]+\.[\S]+)$', line)
+                    if match:
+                        # This was indeed a vhost definition
+                        self.p.setVhost(match.group(1))
+                        continue
                 if not self.isRunning:
                     break
                 # This next line is where most of the processing time
@@ -183,9 +202,9 @@ class Reader(KWParse, Base):
     
     keyWords = (
         ('cores', None),
-        ('vhost', None), ('exclude', []), ('ignoreSecondary', False),
+        ('exclude', []), ('ignoreSecondary', False),
         ('verbose', False), ('info', False), ('warnings', False),
-        ('gui', None))
+        ('gui', None), ('updateOnly', False))
     
     def __init__(self, logFiles, rules, dbURL, **kw):
         self.parseKW(kw)
@@ -202,7 +221,7 @@ class Reader(KWParse, Base):
             gui=self.gui)
         self.pr = ProcessReader(
             self.getMatchers(rules),
-            vhost=self.vhost, exclude=self.exclude,
+            exclude=self.exclude,
             ignoreSecondary=self.ignoreSecondary)
         # A lock for getting shutdown done right
         self.lock = asynqueue.DeferredLock()
@@ -266,7 +285,7 @@ class Reader(KWParse, Base):
             self.msgBody("All done", ID=ID)
 
     @defer.inlineCallbacks
-    def run(self, updateOnly=False):
+    def run(self):
         """
         Runs everything via the process queue (multiprocessing!),
         returning a reference to a list of all IP addresses purged
@@ -304,7 +323,7 @@ class Reader(KWParse, Base):
             filePath = self.pathInDir(fileName)
             ID = self.msgHeading("Logfile {}...", fileName)
             dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
-            if updateOnly:
+            if self.updateOnly:
                 self.msgBody("File datetime: {}", dtFile, ID=ID)
                 return self.rk.fileInfo(
                     fileName).addCallbacks(gotInfo, self.oops)
@@ -318,19 +337,21 @@ class Reader(KWParse, Base):
         # We have at most two files being parsed concurrently for each
         # worker servicing my process queue
         ds = defer.DeferredSemaphore(min([self.N, 2*len(self.pq)]))
-        # "Wait" for everything to start up
-        yield self.rk.startup()
+        # "Wait" for everything to start up and get a list of
+        # known-bad IP addresses
+        ipList = yield self.rk.startup()
+        # Warn workers to ignore records from the bad IPs
+        # DEBUG: Disabled this next line
+        #yield self.pq.update(self.pr.ignoreIPs, ipList)
         # Dispatch files as permitted by the semaphore
         for fileName in self.fileNames:
             if not self.isRunning():
-                self.lock.release()
                 break
             # "Wait" for the number of concurrent parsings to fall
             # back to the limit
             yield ds.acquire()
             # If not running, break out of the loop
             if not self.isRunning():
-                self.lock.release()
                 break
             # References to the deferreds from dispatch calls are
             # stored in the process queue, and we wait for their
@@ -347,8 +368,10 @@ class Reader(KWParse, Base):
             yield defer.DeferredList(dList)
         ipList = self.rk.getNewIPs()
         self.msgBody(
-            "Identified {:d} misbehaving IP addresses",
-            len(ipList))
+            "Identified {:d} misbehaving IP addresses", len(ipList), ID=ID)
         defer.returnValue(ipList)
+        # Can now shut down, regularly or due to interruption
+        self.lock.release()
+
 
 

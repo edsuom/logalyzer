@@ -182,18 +182,6 @@ class Transactor(AccessBroker, util.Base):
         )
         self.pendingID = {}
         self.dtk = DTK()
-
-    @transact
-    def first(self):
-        """
-        Purges any entries with IP addresses in the "bad IP" table that
-        haven't been marked as purged already.
-        """
-        with self.selex(self.bad_ip.c.ip) as sh:
-            sh.where(self.bad_ip.c.purged == False)
-            ipList = sh().fetchall()
-        for ip in ipList:
-            self.purgeIP(ip)
         
     # Public API
     # -------------------------------------------------------------------------
@@ -201,7 +189,9 @@ class Transactor(AccessBroker, util.Base):
     def preload(self):
         """
         Loads my DTK and IPMatcher objects from the database, returning a
-        deferred that fires with the IPMatcher object when it is loaded.
+        deferred that fires with (1) the IPMatcher object loaded with
+        all IP addresses found in the database, and (2) a list of
+        known-bad IP addresses.
 
         You can use the DTK object via I{dtk} in the meantime; doing
         so will save you more and more time as the entries load from
@@ -211,21 +201,20 @@ class Transactor(AccessBroker, util.Base):
             consumer = PreloadConsumer(f, **kw)
             s = self.select([getattr(col, colName)], distinct=True)
             return self.selectorator(s, consumer)
-        
+
+        @defer.inlineCallbacks
         def run():
-            # IP matcher
-            dIPM = load('ip', ipm.addIP, ignoreCache=True)
-            dIPM.addCallback(done)
-            # DTK
+            # Bad IP addresses
+            ipList = yield self.badIPs()
+            # DTK, which we don't need to wait for
             dDTK = load('dt', self.dtk.set)
             dDTK.addCallback(lambda _: self.dtk.isPending(False))
-            # The caller only needs to wait for loading of the IP
-            # matcher, not the DTK object
-            return dIPM
-
-        def done(null):
+            # IP matcher, which we do
+            yield load('ip', ipm.addIP, ignoreCache=True)
+            # Now that IP Matcher is loaded, give me an attribute
+            # reference to it
             self.ipm = ipm
-            return ipm
+            defer.returnValue([ipm, ipList])
 
         ipm = IPMatcher()
         col = self.entries.c
@@ -279,6 +268,8 @@ class Transactor(AccessBroker, util.Base):
         Purges the database of entries with the specified IP address,
         returning the (deferred) number of rows that were matched and
         presumably deleted.
+
+        Also adds it to the DB table of known-bad IP addresses.
         """
         with self.selex(self.entries.delete) as sh:
             sh.where(self.entries.c.ip == ip)
@@ -335,7 +326,24 @@ class Transactor(AccessBroker, util.Base):
 
     # More or less internal methods
     # -------------------------------------------------------------------------
-        
+
+    @transact
+    def badIPs(self):
+        """
+        Purges any entries with IP addresses in the "bad IP" table that
+        haven't been marked as purged already. Returns a list of all
+        the bad IP addresses.
+        """
+        with self.selex(self.bad_ip.c.ip) as sh:
+            sh.where(self.bad_ip.c.purged == False)
+            rows = sh().fetchall()
+        ipList = []
+        for row in rows:
+            ip = row[0]
+            self.purgeIP(ip)
+            ipList.append(ip)
+        return ipList
+    
     @transact
     def insertEntry(self, dt, values):
         """

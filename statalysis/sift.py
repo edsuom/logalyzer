@@ -263,6 +263,14 @@ class BotMatcher(ReMatcherBase):
 class RefMatcher(ReMatcherBase):
     """
     I use parsed .ref rules to efficiently check for referrers that
-    are clearly logspammer, and should get blocked.
+    are clearly logspammers, and should get blocked.
+    """
+
+
+class VhostMatcher(ReMatcherBase):
+    """
+    I use parsed .vhost rules to efficiently check for referrers that
+    are requesting clearly inappropriate vhosts , and should get
+    blocked.
     """
 

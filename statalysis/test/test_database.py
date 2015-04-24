@@ -94,7 +94,9 @@ class TestTransactor(TestCase):
                 values = makeEntry(ip, 200, False)
                 yield self.t.insertEntry(dt, values)
         # Do the preload
-        ipm = yield self.t.preload()
+        ipm, ipList = yield self.t.preload()
+        # No bad ones were defined
+        self.assertEqual(ipList, [])
         # Check the IP Matcher
         for ip, expected in ((ip1, True), (ip2, True), ("192.168.1.1", False)):
             self.assertEqual(ipm(ip), expected)

@@ -67,7 +67,7 @@ class ProcessConsumer(Base):
                 self.fileName, "Done: {:d}/{:d}", self.N_added, self.N_parsed)
             del self.rk
         if hasattr(self, 'gui'):
-            # Will this fix the GUI-only memory leak? Dunno.
+            # Does this help the GUI-only memory leak? Dunno. Doesn't hurt.
             del self.gui
         self.dProducer.callback(None)
 
@@ -79,6 +79,10 @@ class ProcessConsumer(Base):
                 self.N_parsed += 1
                 if wasAdded:
                     self.N_added += 1
+                return
+                # This next little bit causes a huge memory leak, only
+                # in GUI mode. A high price to pay to watch a spinner
+                # symbol, so it's avoided with the 'return' above.
                 if not self.N_parsed % 10:
                     self.rk.fileProgress(self.fileName)
                 if self.msgID and not self.N_added % 100:
@@ -97,12 +101,10 @@ class ProcessConsumer(Base):
             # queue's memory usage from ballooning with a backlog of
             # pending records.
             self.producer.pauseProducing()
-
-            # Major memory leak here: Simply running the callback with
-            # defer.succeed(False) still adds a little over 5,000 bytes per
-            # record parsed to the memory usage.
+            # Major memory leak was caused by the callback, in GUI
+            # mode: It added a little over 5,000 bytes per record
+            # parsed to the memory usage.
             d = self.rk.addRecord(*data).addCallbacks(done, self.oops)
-            #d = defer.succeed(False).addCallback(done)
         self.dt.put(d)
 
     def stopProduction(self, ID=None):
@@ -132,8 +134,6 @@ class RecordKeeper(Base):
             self, dbURL, N_pool,
             verbose=False, info=False, echo=False, gui=None):
         # ---------------------------------------------------------------------
-        # List of IP addresses purged during this session
-        self.ipList = []
         self.t = database.Transactor(
             dbURL, pool_size=N_pool, verbose=echo, echo=echo)
         self.verbose = verbose
@@ -141,10 +141,19 @@ class RecordKeeper(Base):
         self.gui = gui
 
     def startup(self):
-        def done(ipm):
-            self.ipm = ipm
-            self.msgBody("{:d} IP addresses", len(ipm), ID=ID)
-        ID = self.msgHeading("Preloading IP Matcher from DB")
+        """
+        Returns a deferred that fires when my DB transactor is running and
+        I've preloaded my IPMatcher and list of bad IP
+        addresses. Fires with the bad-ip list.
+        """
+        def done(stuff):
+            self.ipm, self.ipList = stuff
+            self.msgBody(
+                "DB has records from {:d} IP addresses and warns "+\
+                "of {:d} known bad ones",
+                len(self.ipm), len(self.ipList), ID=ID)
+            return self.ipList
+        ID = self.msgHeading("Preloading IP info from DB")
         return self.t.callWhenRunning(
             self.t.preload).addCallbacks(done, self.oops)
         
@@ -159,7 +168,6 @@ class RecordKeeper(Base):
         """
         return ProcessConsumer(
             self, fileName, msgID=msgID, verbose=self.verbose, gui=self.gui)
-        #verbose=self.info)
     
     def fileInfo(self, *args):
         """

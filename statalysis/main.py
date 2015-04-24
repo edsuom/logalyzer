@@ -8,7 +8,7 @@ statalysis: Analyzes web server log files
 
 
 SYNOPSIS
-sa [--vhost somehost.com]
+sa [-v, --verbose] [--cores N]
    [-p] [-e, --exclude http1,http2,...]
    [-d, --ruledir <directory of rule files>]
      [-i, --ip  [xX]|rule1,rule2,...]
@@ -16,9 +16,8 @@ sa [--vhost somehost.com]
      [-u, --ua  [xX]|rule1,rule2,...]
      [-b, --bot [xX]|rule1,rule2,...]
      [-r, --ref [xX]|rule1,rule2,...]
-   [--omit] [-y, --secondary]
+   [-y, --secondary]
    [-s, --save <file to save purged IPs>]
-   [-v, --verbose]
 dbURL [logfiles...]
 
 
@@ -43,9 +42,6 @@ your web server!
 
 
 OPTIONS
-
---vhost vhost
-A particular virtual host of interest
 
 -e, --exclude exclude
 Exclude HTTP code(s) (comma separated list, no spaces)
@@ -73,6 +69,10 @@ sensitive) that match url strings indicating a malicious bot
 -r, --referrer rules
 Rules corresponding to .ref files containing regular expressions (case
 sensitive) that match referrer strings indicating a malicious bot
+
+-o, --vhost rules
+Rules corresponding to .vhost files containing regular expressions (case
+sensitive) that match virtual host requests indicating a malicious bot
 
 -y, --secondary
 Ignore secondary files (css, webfonts, images)
@@ -179,11 +179,13 @@ class Recorder(Base):
 
     """
     ruleTable = (
-        ('i', "ip",  "IPMatcher"),
-        ('n', "net", "NetMatcher"),
-        ('u', "ua",  "UAMatcher"),
-        ('b', "url", "BotMatcher"),
-        ('r', "ref", "RefMatcher"))
+        ('i', "ip",    "IPMatcher"),
+        ('n', "net",   "NetMatcher"),
+        ('u', "ua",    "UAMatcher"),
+        ('b', "url",   "BotMatcher"),
+        ('r', "ref",   "RefMatcher"),
+        ('o', "vhost", "VhostMatcher"),
+    )
     
     def __init__(self, opt):
         self.opt = opt
@@ -235,28 +237,34 @@ class Recorder(Base):
         return logread.Reader(
             self.logFiles, rules, dbURL,
             cores=self.opt['cores'],
-            vhost=self.opt['vhost'],
             exclude=self.csvTextToList(self.opt['e'], int),
             ignoreSecondary=self.opt['y'],
             verbose=self.verbose, info=self.opt['info'],
-            warnings=self.opt['w'], gui=self.gui)
+            warnings=self.opt['w'], gui=self.gui, updateOnly=self.opt['t'])
 
-    @defer.inlineCallbacks
     def load(self):
         """
         This is where it all happens.
         """
+        def done(ipList):
+            pf.disable()
+            pf.dump_stats('sa-profile.dat')
+            pf.print_stats()
+            filePath = self.opt['s']
+            if filePath:
+                w = IPWriter()
+                w.writeIPs(ipList, filePath)
+            self.msgHeading("All Done!")
+            if self.gui and self.reader.isRunning():
+                self.msgBody("Press 'q' to quit.")
+            else:
+                reactor.stop()
+        # Profiling
+        from cProfile import Profile
+        pf = Profile()
+        pf.enable()
         # Almost all of my time is spent in this next line
-        ipList = yield self.reader.run(self.opt['t']).addErrback(self.oops)
-        filePath = self.opt['s']
-        if filePath:
-            w = IPWriter()
-            w.writeIPs(ipList, filePath)
-        self.msgHeading("All Done!")
-        if self.gui and self.reader.isRunning():
-            self.msgBody("Press 'q' to quit.")
-        else:
-            reactor.stop()
+        return self.reader.run().addCallbacks(done, self.oops)
 
     def consolidate(self, outPath):
         """

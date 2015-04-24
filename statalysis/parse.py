@@ -61,11 +61,13 @@ class MatcherManager(object):
     methods.
     """
     matcherTable = (
-        ('ipMatcher',  'IPMatcher'),
-        ('netMatcher', 'NetMatcher'),
-        ('uaMatcher',  'UAMatcher'),
-        ('botMatcher', 'BotMatcher'),
-        ('refMatcher', 'RefMatcher'))
+        ('ipMatcher',    'IPMatcher'),
+        ('netMatcher',   'NetMatcher'),
+        ('uaMatcher',    'UAMatcher'),
+        ('botMatcher',   'BotMatcher'),
+        ('refMatcher',   'RefMatcher'),
+        ('vhostMatcher', 'VhostMatcher'),
+    )
 
     def __init__(self, matchers):
         for callableName, matcherName in self.matcherTable:
@@ -143,6 +145,9 @@ class LineParser(object):
         month = self.months.index(monthName) + 1
         return self.dtFactory(year, month, day, hour, minute, second)
 
+    def setVhost(self, vhost):
+        self.vhost = vhost.lower()
+    
     def __call__(self, line):
         """
         Parses an individual logfile line and returns a list:
@@ -161,6 +166,13 @@ class LineParser(object):
         if match is None:
             return
         result = [match.group(2).lower(), match.group(1)]
+        if result[0] == '-':
+            # No vhost specified for this record...
+            vhost = getattr(self, 'vhost', None)
+            if vhost:
+                # ...but we have one defined for the whole file, so
+                # use that
+                result[0] = vhost
         if dt is None:
             dt = self.parseDatetimeBlock(match.group(3))
         result.extend([dt, match.group(5), int(match.group(6))])
