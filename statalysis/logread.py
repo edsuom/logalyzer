@@ -340,9 +340,11 @@ class Reader(KWParse, Base):
         # "Wait" for everything to start up and get a list of
         # known-bad IP addresses
         ipList = yield self.rk.startup()
+        
         # Warn workers to ignore records from the bad IPs
-        # DEBUG: Disabled this next line
+        # DEBUG: Disabled this next line as we don't seem to proceed past it.
         #yield self.pq.update(self.pr.ignoreIPs, ipList)
+
         # Dispatch files as permitted by the semaphore
         for fileName in self.fileNames:
             if not self.isRunning():

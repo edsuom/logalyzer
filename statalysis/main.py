@@ -247,9 +247,6 @@ class Recorder(Base):
         This is where it all happens.
         """
         def done(ipList):
-            pf.disable()
-            pf.dump_stats('sa-profile.dat')
-            pf.print_stats()
             filePath = self.opt['s']
             if filePath:
                 w = IPWriter()
@@ -259,10 +256,6 @@ class Recorder(Base):
                 self.msgBody("Press 'q' to quit.")
             else:
                 reactor.stop()
-        # Profiling
-        from cProfile import Profile
-        pf = Profile()
-        pf.enable()
         # Almost all of my time is spent in this next line
         return self.reader.run().addCallbacks(done, self.oops)
 
