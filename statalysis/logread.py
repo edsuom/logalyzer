@@ -225,8 +225,6 @@ class Reader(KWParse, Base):
             ignoreSecondary=self.ignoreSecondary)
         # A lock for getting shutdown done right
         self.lock = asynqueue.DeferredLock()
-        reactor.addSystemEventTrigger(
-            'before', 'shutdown', self.shutdown)
 
     def isRunning(self):
         if hasattr(self, '_shutdownFlag'):
@@ -262,27 +260,32 @@ class Reader(KWParse, Base):
         """
         Call this to shut everything down.
         """
-        if not hasattr(self, '_shutdownFlag'):
+        if hasattr(self, '_shutdownFlag'):
+            self.msgWarning("Ignoring repeated call to reader shutdown")
+        else:
             # Signal dispatch loop to quit
             self._shutdownFlag = None
-            ID = self.msgHeading("Shutting down...")
+            ID = self.msgHeading("Reader shutting down...")
             # Delete my consumers and "wait" for them to stop their
             # producers
             dList = []
             while self.consumers:
                 dList.append(self.consumers.pop(0).stopProduction(ID))
-            yield defer.DeferredList(dList)
+            if dList:
+                yield defer.DeferredList(dList)
+                self.msgBody(
+                    "Stopped {:d} active consumers", len(dList), ID=ID)
+            else:
+                self.msgBody("No consumers active", ID=ID)
             # "Wait" for lock
             yield self.lock.acquireAndRelease()
+            self.msgBody("Dispatch loop finished", ID=ID)
             # "Wait" for process queue to shut down
-            self.msgBody(
-                "Producers stopped, shutting down process queue", ID=ID)
             yield self.pq.shutdown()
-            self.msgBody(
-                "Process queue stopped, shutting down recordkeeper", ID=ID)
+            self.msgBody("Process queue stopped", ID=ID)
             # "Wait" for recordkeeper to shut down
             yield self.rk.shutdown(ID)
-            self.msgBody("All done", ID=ID)
+            self.msgBody("Record keeper shut down, all done", ID=ID)
 
     @defer.inlineCallbacks
     def run(self):
@@ -366,11 +369,12 @@ class Reader(KWParse, Base):
             # When filenames have all been dispatched without interruption
             self.msgBody(
                 "Done dispatching, awaiting {:d} last results",
-                ds.tokens-ds.limit, ID=ID)
+                ds.limit-ds.tokens, ID=ID)
             yield defer.DeferredList(dList)
         ipList = self.rk.getNewIPs()
         self.msgBody(
             "Identified {:d} misbehaving IP addresses", len(ipList), ID=ID)
+        # Fire result deferred with list of bad IPs
         defer.returnValue(ipList)
         # Can now shut down, regularly or due to interruption
         self.lock.release()

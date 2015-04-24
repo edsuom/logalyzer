@@ -109,7 +109,6 @@ class ProcessConsumer(Base):
 
     def stopProduction(self, ID=None):
         del self.rk
-        self.dShutdown = defer.Deferred()
         if hasattr(self, 'producer'):
             self.msgBody(
                 "Stopping producer {} after {:d}/{:d} records",

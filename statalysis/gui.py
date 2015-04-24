@@ -329,9 +329,9 @@ class GUI(object):
          'brown', 'default', 'default'),
     ]
     
-    def __init__(self, *stoppers):
+    def __init__(self, stopperFunction):
         self.running = False
-        self.stoppers = list(stoppers)
+        self.stopperFunction = stopperFunction
         self.id_counter = 0
         # A screen is useful right away
         self.screen = Screen()
@@ -344,7 +344,9 @@ class GUI(object):
         """
         def possiblyQuit(key):
             if key in ('q', 'Q'):
-                reactor.callFromThread(self.stop)
+                # I trust the stopper function to call my stop method
+                # at the appropriate time
+                reactor.callFromThread(reactor.stop)
                 
         # The top-level widgets
         self.m = Messages()
@@ -364,10 +366,9 @@ class GUI(object):
         #sys.stdout = StdSubstitute('STDOUT', self)
         sys.stderr = observer = StdSubstitute('STDERR', self)
         twisted.python.log.addObserver(observer)
-        reactor.addSystemEventTrigger('before', 'shutdown', self.stop)
         self.running = True
         self.loop.start()
-
+        
     def _dims(self):
         # Deduct 4 from each dimension due to outline and padding
         return [x-4 for x in self.screen.get_cols_rows()]
@@ -384,17 +385,14 @@ class GUI(object):
             self.f.updateWidth(width)
         self.loop.draw_screen()
 
-    @defer.inlineCallbacks
     def stop(self):
         """
-        Runs stopper functions and tears down the GUI display just before
-        the reactor is stopped.
+        Tears down the GUI display. This will be called by
+        L{main.Recorder.shutdown} after all other shutdown steps are
+        done, as part of the Twisted reactor shutdown.
         """
         if self.running and not hasattr(self, '_shutdownFlag'):
             self._shutdownFlag = None
-            self.warning("Stopping...")
-            while self.stoppers:
-                yield defer.maybeDeferred(self.stoppers.pop(0))
             self.running = False
             self.screen.unhook_event_loop(self.loop)
             self.loop.stop()

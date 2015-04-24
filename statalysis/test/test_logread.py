@@ -103,17 +103,20 @@ class TestReader(TestCase):
         self.rules = {'BotMatcher': RULES_BOT}
         self.r = logread.Reader(
             logFiles, self.rules, DB_URL,
-            cores=1, verbose=self.isVerbose(), vhost="evolvingoutofeden.com")
+            cores=1, verbose=self.isVerbose())
         self.t = self.r.rk.t
        
     @defer.inlineCallbacks
     def test_run(self):
         ipList = yield self.r.run().addErrback(self.oops)
+        self.msg("Dispatch loop done, got {:d} bad IP addresses", len(ipList))
         self.assertIsInstance(ipList, list)
         self.assertTrue(len(ipList) > 1)
         Ne = 2
-        N = yield self.t.hitsForIP("207.216.252.13")
-        msg = "Expected at least {:d} records, got {:d}".format(Ne, N)
+        ip = "207.216.252.13"
+        N = yield self.t.hitsForIP(ip)
+        msg = "Expected at least {:d} records for IP '{}', got {:d}".format(
+            Ne, ip, N)
         self.assertGreater(N, Ne, msg)
         yield self.r.shutdown()
         

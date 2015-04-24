@@ -190,7 +190,23 @@ class Recorder(Base):
     def __init__(self, opt):
         self.opt = opt
         self.verbose = opt['v']
+        self.triggerID = reactor.addSystemEventTrigger(
+            'before', 'shutdown', self.shutdown)
 
+    def shutdown(self):
+        """
+        There is only one appropriate callback for shutting the program
+        down, and this is it. Let the reactor call it automatically
+        when you do a reactor.stop().
+        """
+        def done(null):
+            if self.gui:
+                self.gui.stop()
+        if hasattr(self, 'triggerID'):
+            reactor.removeSystemEventTrigger(self.triggerID)
+            del self.triggerID
+        return self.reader.shutdown().addBoth(done)
+        
     def parseArgs(self):
         args = list(self.opt)
         self.dbURL = args[0]
@@ -251,7 +267,7 @@ class Recorder(Base):
             if filePath:
                 w = IPWriter()
                 w.writeIPs(ipList, filePath)
-            self.msgHeading("All Done!")
+            self.msgHeading("Done")
             if self.gui and self.reader.isRunning():
                 self.msgBody("Press 'q' to quit.")
             else:
@@ -279,13 +295,10 @@ class Recorder(Base):
         self.parseArgs()
         # GUI, if -g option
         if self.opt['g']:
-            self.gui = gui.GUI()
+            self.gui = gui.GUI(self.shutdown)
             self.gui.start(self.logFiles)
         # Reader
         self.reader = self.readerFactory(self.opt[0])
-        # GUI will stop reader when it shuts down
-        if self.gui:
-            self.gui.stoppers.append(self.reader.shutdown)
         # Everything starts with my load method
         reactor.callWhenRunning(self.load)
         # GO!
