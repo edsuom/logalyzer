@@ -344,13 +344,12 @@ class Transactor(AccessBroker, util.Base):
         haven't been marked as purged already. Returns a list of all
         the bad IP addresses.
         """
-        with self.selex(self.bad_ip.c.ip) as sh:
-            sh.where(self.bad_ip.c.purged == False)
-            rows = sh().fetchall()
         ipList = []
-        for row in rows:
-            ip = row[0]
-            self.purgeIP(ip)
+        with self.selex(self.bad_ip.c.ip, self.bad_ip.c.purged) as sh:
+            rows = sh().fetchall()
+        for ip, wasPurged in rows:
+            if not wasPurged:
+                self.purgeIP(ip)
             ipList.append(ip)
         return ipList
     

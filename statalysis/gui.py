@@ -343,7 +343,7 @@ class GUI(object):
         Constructs my widgets and starts my event loop and main loop.
         """
         def possiblyQuit(key):
-            if key in ('q', 'Q'):
+            if key in ('q', 'Q') and reactor.running:
                 # I trust the stopper function to call my stop method
                 # at the appropriate time
                 reactor.callFromThread(reactor.stop)
