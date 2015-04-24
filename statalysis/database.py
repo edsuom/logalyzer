@@ -182,11 +182,9 @@ class Transactor(AccessBroker, util.Base):
         )
         self.pendingID = {}
         self.dtk = DTK()
-        self.valueTable = {}
-        self.valueViews = {}
+        self.idTable = {}
         for name in self.indexedValues:
-            self.valueTable[name] = thisDict = {}
-            self.valueViews[name] = thisDict.viewvalues()
+            self.idTable[name] = {}
         
     # Public API
     # -------------------------------------------------------------------------
@@ -237,7 +235,14 @@ class Transactor(AccessBroker, util.Base):
         # Build list of values and indexed-value IDs
         values = [record[x] for x in self.directValues]
         for name in self.indexedValues:
-            ID = yield self.getID(name, record[name])
+            value = record[name][:self.valueLength]
+            if value in self.idTable[name]:
+                # We've set this value already
+                ID = self.idTable[name][value]
+            else:
+                ID = yield self.setNameValue(name, value, niceness=-15)
+                # Add to idTable for future reference, avoiding DB checks
+                self.idTable[name][value] = ID
             values.append(ID)
         # With this next line commented out and result = False
         # instead, the memory leak still persists. CPU time for the
@@ -440,30 +445,12 @@ class Transactor(AccessBroker, util.Base):
             self.s(cList, col.dt == SA.bindparam('dt'))
         return self.s().execute(dt=dt)
 
-    def getID(self, name, value):
-        """
-        Returns a deferred to the unique ID for value string in the named
-        DB table.
-
-        Runs asynchronously; don't call from a transact method.
-        """
-        return self.setNameValue(name, value[:self.valueLength], niceness=-15)
-        
     @transact
     def setNameValue(self, name, value):
         """
         Get the unique ID for this value in the named table, adding a new
         entry for it there if necessary.
         """
-        if value in self.valueViews[name]:
-            # We've loaded or set this value already
-            for ID, thisValue in self.valueTable[name].iteritems():
-                # Find the ID for the value
-                if thisValue == value:
-                    return ID
-            else:
-                raise Exception(
-                    "WTF? Entry in valueViews but not valueTable!")
         table = getattr(self, name)
         if not self.s("s_{}".format(name)):
             self.s([table.c.id], table.c.value == SA.bindparam('value'))
@@ -472,9 +459,6 @@ class Transactor(AccessBroker, util.Base):
             rp = table.insert().execute(value=value)
             ID = rp.lastrowid
             rp.close()
-        # Add to valueTable (and, automatically, valueViews) for
-        # future reference, avoiding DB checks
-        self.valueTable[name][ID] = value
         return ID
        
     @transact
@@ -486,16 +470,11 @@ class Transactor(AccessBroker, util.Base):
         result = {}
         for k, ID in enumerate(IDs):
             name = self.indexedValues[k]
-            if ID in self.valueTable[name]:
-                # We've loaded or set the value for this ID already,
-                # just get it from the in-memory table
-                result[name] = self.valueTable[name][ID]
-            else:
-                cols = getattr(getattr(self, name), 'c')
-                with self.selex(cols.value) as sh:
-                    sh.where(cols.id == ID)
-                    rp = sh()
-                    result[name] = rp.scalar()
+            cols = getattr(getattr(self, name), 'c')
+            with self.selex(cols.value) as sh:
+                sh.where(cols.id == ID)
+                rp = sh()
+                result[name] = rp.scalar()
         return result
 
 

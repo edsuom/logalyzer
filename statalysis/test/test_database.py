@@ -187,9 +187,9 @@ class TestTransactor(TestCase):
                     self.assertEqual(ID, k+1)
         
     @defer.inlineCallbacks
-    def test_getID(self):
+    def test_setNameValue_more(self):
         def nowRun(null, name, value):
-            return self.t.getID(name, value).addCallback(
+            return self.t.setNameValue(name, value).addCallback(
                 lambda ID: IDLists[value].append(ID))
         N = 4
         someValues = ("foo", "bar-whatever", "/wasting-time forever")
