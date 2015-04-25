@@ -320,8 +320,10 @@ class Reader(KWParse, Base):
                     self.pr, filePath, consumer=consumer).addCallback(done)
 
             def done(consumer):
+                N = consumer.N_parsed
                 self.consumers.remove(consumer)
-                return self.rk.fileInfo(fileName, dtFile, consumer.N_parsed)
+                self.msgBody("Parsed {:d} records from {}", N, fileName, ID=ID)
+                return self.rk.fileInfo(fileName, dtFile, N)
 
             filePath = self.pathInDir(fileName)
             ID = self.msgHeading("Logfile {}...", fileName)
@@ -364,13 +366,10 @@ class Reader(KWParse, Base):
             d = dispatch(fileName)
             d.addCallback(lambda _: ds.release())
             dList.append(d)
-            self.msgProgress(ID)
-        else:
-            # When filenames have all been dispatched without interruption
-            self.msgBody(
-                "Done dispatching, awaiting {:d} last results",
-                ds.limit-ds.tokens, ID=ID)
-            yield defer.DeferredList(dList)
+        self.msgBody(
+            "Done dispatching, awaiting {:d} last results",
+            ds.limit-ds.tokens, ID=ID)
+        yield defer.DeferredList(dList)
         ipList = self.rk.getNewIPs()
         self.msgBody(
             "Identified {:d} misbehaving IP addresses", len(ipList), ID=ID)
