@@ -44,7 +44,8 @@ class ProcessConsumer(Base):
             raise TypeError("I only work with push producers")
         self.producer = producer
         producer.registerConsumer(self)
-        self.msgHeading("Producer {} registered", repr(producer))
+        if self.verbose:
+            self.msgHeading("Producer {} registered", repr(producer))
         if self.msgID:
             self.rk.msgBody(
                 "Process now loading file {}", self.fileName, ID=self.msgID)
@@ -55,9 +56,10 @@ class ProcessConsumer(Base):
         if not hasattr(self, 'producer'):
             return
         del self.producer
-        self.msgBody(
-            "Added {:d} of {:d} records from producer",
-            self.N_added, self.N_parsed)
+        if self.verbose:
+            self.msgBody(
+                "Added {:d} of {:d} records from producer",
+                self.N_added, self.N_parsed)
         if hasattr(self, 'rk'):
             if self.msgID:
                 self.rk.msgBody(
@@ -111,7 +113,7 @@ class ProcessConsumer(Base):
         del self.rk
         if hasattr(self, 'producer'):
             self.msgBody(
-                "Stopping producer {} after {:d}/{:d} records",
+                "Interrupting producer {} after {:d}/{:d} records",
                 repr(self.producer), self.N_added, self.N_parsed, ID=ID)
             self.producer.stopProducing()
         return self.dt.deferToAll()
@@ -142,16 +144,16 @@ class RecordKeeper(Base):
     def startup(self):
         """
         Returns a deferred that fires when my DB transactor is running and
-        I've preloaded my IPMatcher and list of bad IP
+        my transactor has preloaded its IPMatcher and list of bad IP
         addresses. Fires with the bad-ip list.
         """
         def done(stuff):
-            self.ipm, self.ipList = stuff
+            N_ip, ipList = stuff
             self.msgBody(
                 "DB has records from {:d} IP addresses and warns "+\
                 "of {:d} known bad ones",
-                len(self.ipm), len(self.ipList), ID=ID)
-            return self.ipList
+                N_ip, len(ipList), ID=ID)
+            return ipList
         ID = self.msgHeading("Preloading IP info from DB")
         return self.t.callWhenRunning(
             self.t.preload).addCallbacks(done, self.oops)
@@ -166,7 +168,7 @@ class RecordKeeper(Base):
         parsing a particular logfile.
         """
         return ProcessConsumer(
-            self, fileName, msgID=msgID, verbose=self.verbose, gui=self.gui)
+            self, fileName, msgID=msgID, verbose=self.info, gui=self.gui)
     
     def fileInfo(self, *args):
         """
@@ -182,27 +184,24 @@ class RecordKeeper(Base):
         addresses can be provided. Any further adds from this IP are
         ignored.
 
-        Returns a deferred that fires when the database has been
-        updated, or immediately if no database transaction is needed.
+        @return: A C{Deferred} that fires when the database has been
+          updated, or immediately if no database transaction is
+          needed.
+        
         """
         def donePurging(N):
-            self.msgBody(
-                "Purged {:d} DB entries for IP {}", N, ip, ID=ID)
+            if N:
+                self.msgProgress(self.purgeMsgID)
 
-        if ip in self.ipList:
-            # This IP address was already purged during this session
+        if not hasattr(self, 'purgeMsgID'):
+            self.purgeMsgID = self.msgHeading("Purging IP addresses")
+        if ip in self.t.ipList:
+            # This IP address was already purged during this session,
+            # don't even go to the queue
             return defer.succeed(None)
-        # Add to this session's purge (and ignore) list
-        self.ipList.append(ip)
-        if not self.ipm(ip):
-            # This IP address isn't in the database; nothing to purge.
-            return defer.succeed(None)
-        # The in-database IP matcher says it's in the database so it
-        # needs to be removed...
-        self.ipm.removeIP(ip)
-        # ...though the actual DB transaction is very low priority
-        # because our IP matcher was just updated
-        ID = self.msgHeading("Purging IP address {}", ip)
+        # Add to this session's purge (and ignore) list and update the
+        # DB accordingly
+        self.t.ipList.append(ip)
         return self.t.purgeIP(
             ip, niceness=15).addCallbacks(donePurging, self.oops)
 
@@ -218,11 +217,6 @@ class RecordKeeper(Base):
         Returns a deferred that fires with a Bool indicating if a new
         entry was added to the database.
         """
-        ip = record['ip']
-        if ip in self.ipList:
-            # Ignore this, it's from a purged IP address
-            return defer.succeed(False)
-        self.ipm.addIP(ip)
         return self.t.setRecord(dt, record).addErrback(self.oops)
 
     def getNewIPs(self):
@@ -233,8 +227,8 @@ class RecordKeeper(Base):
         """
         if not hasattr(self, 'ipList_index'):
             self.ipList_index = 0
-        result = self.ipList[self.ipList_index:]
-        self.ipList_index = len(self.ipList) - 1
+        result = self.t.ipList[self.ipList_index:]
+        self.ipList_index = len(self.t.ipList) - 1
         return result
 
 

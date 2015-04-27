@@ -268,9 +268,10 @@ class Recorder(Base):
                 w = IPWriter()
                 w.writeIPs(ipList, filePath)
             self.msgHeading("Done")
-            if self.gui and self.reader.isRunning():
-                self.msgBody("Press 'q' to quit.")
-            else:
+            if self.gui:
+                if self.reader.isRunning():
+                    self.msgBody("Press 'q' to quit.")
+            elif reactor.running:
                 reactor.stop()
         # Almost all of my time is spent in this next line
         return self.reader.run().addCallbacks(done, self.oops)

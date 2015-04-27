@@ -79,7 +79,7 @@ class ProcessReader(KWParse):
 
         * A 2-tuple containing a datetime object and a dict describing
           the record for the logfile valid line. The dict contains the
-          following entries:
+          following entries::
 
             ip:     Requestor IP address
             http:   HTTP code
@@ -146,12 +146,12 @@ class ProcessReader(KWParse):
             return
         return dt, record
 
-    def ignoreIPs(self, IPs):
+    def ignoreIPs(self, ipList):
         """
         The supervising process may call this with a list of IP addresses
         to be rejected as I continue parsing.
         """
-        for IP in IPs:
+        for ip in ipList:
             self.ipm.addIP(ip)
             
     def __call__(self, fileName):
@@ -347,8 +347,7 @@ class Reader(KWParse, Base):
         ipList = yield self.rk.startup()
         
         # Warn workers to ignore records from the bad IPs
-        # DEBUG: Disabled this next line as we don't seem to proceed past it.
-        #yield self.pq.update(self.pr.ignoreIPs, ipList)
+        yield self.pq.update(self.pr.ignoreIPs, ipList)
 
         # Dispatch files as permitted by the semaphore
         for fileName in self.fileNames:
@@ -373,10 +372,10 @@ class Reader(KWParse, Base):
         ipList = self.rk.getNewIPs()
         self.msgBody(
             "Identified {:d} misbehaving IP addresses", len(ipList), ID=ID)
-        # Fire result deferred with list of bad IPs
-        defer.returnValue(ipList)
         # Can now shut down, regularly or due to interruption
         self.lock.release()
+        # Fire result deferred with list of bad IPs
+        defer.returnValue(ipList)
 
 
 

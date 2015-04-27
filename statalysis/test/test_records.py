@@ -25,8 +25,9 @@ class TestRecordKeeper(TestCase):
     
     @defer.inlineCallbacks
     def tearDown(self):
-        if hasattr(self.t, 'entries'):
-            yield self.t.sql("DROP TABLE entries")
+        for tableName in ('entries', 'bad_ip'):
+            if hasattr(self.t, tableName):
+                yield self.t.sql("DROP TABLE {}".format(tableName))
         yield self.rk.shutdown()
 
     @defer.inlineCallbacks
@@ -36,14 +37,13 @@ class TestRecordKeeper(TestCase):
             for thisRecord in theseRecords:
                 yield self.rk.addRecord(dt, thisRecord)
         # IPM before purge
-        self.assertTrue(self.rk.ipm(ip1))
+        self.assertTrue(self.t.ipm(ip1))
         # Purge an IP address. In the test, we wait for the purge, but
         # not in real life.
-        d = self.rk.purgeIP(ip1)
-        # IPM after purge, immediately
-        self.assertFalse(self.rk.ipm(ip1), ip1)
+        yield self.rk.purgeIP(ip1)
+        # IPM after purge
+        self.assertFalse(self.t.ipm(ip1), ip1)
         # Make sure it's not in the DB anymore, either
-        yield d
         N = yield self.t.hitsForIP(ip1)
         self.assertEqual(N, 0)
         
@@ -57,4 +57,4 @@ class TestRecordKeeper(TestCase):
         for k, ip in enumerate([ip1, ip2]):
             N = yield self.t.hitsForIP(ip)
             self.assertEqual(N, N_expected[k])
-            self.assertTrue(self.rk.ipm(ip))
+            self.assertTrue(self.t.ipm(ip))

@@ -80,7 +80,7 @@ class TestTransactor(TestCase):
     @defer.inlineCallbacks
     def tearDown(self):
         if getattr(getattr(self, 't', None), 'running', False):
-            tableNames = ['entries', 'files'] + self.t.indexedValues
+            tableNames = ['entries', 'bad_ip', 'files'] + self.t.indexedValues
             for tableName in tableNames:
                 if hasattr(self.t, tableName):
                     yield self.t.sql("DROP TABLE {}".format(tableName))
@@ -94,12 +94,12 @@ class TestTransactor(TestCase):
                 values = makeEntry(ip, 200, False)
                 yield self.t.insertEntry(dt, values)
         # Do the preload
-        ipm, ipList = yield self.t.preload()
+        N_ip, ipList = yield self.t.preload()
         # No bad ones were defined
         self.assertEqual(ipList, [])
         # Check the IP Matcher
         for ip, expected in ((ip1, True), (ip2, True), ("192.168.1.1", False)):
-            self.assertEqual(ipm(ip), expected)
+            self.assertEqual(self.t.ipm(ip), expected)
         # Wait for and check the DTK
         yield Delay().untilEvent(lambda: not self.t.dtk.isPending())
         for dt, expected in ((dt1, True), (dt2, True), (dt3, False)):
@@ -227,6 +227,7 @@ class TestTransactor(TestCase):
     def writeAllRecords(self):
         for dt, records in RECORDS.iteritems():
             for record in records:
+                self.t.ipm.addIP(record['ip'])
                 values = [record[x] for x in self.t.directValues]
                 IDs = yield self._writeIndexedValues(record)
                 values.extend(IDs)

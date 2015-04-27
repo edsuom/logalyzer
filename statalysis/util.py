@@ -239,20 +239,12 @@ class Base(object):
         elif self.verbose:
             print "WARNING: "+proto.format(*args)
 
-    def msgError(self, proto, *args, **kw):
-        stop = kw.get('stop', False)
+    def msgError(self, proto, *args):
         if self.gui:
             self.gui.error(proto, *args)
             if stop:
                 self.linger(True)
                 return self.deferToDelay(10)
-        if stop:
-            from twisted.internet import reactor
-            if reactor.running:
-                try:
-                    reactor.stop()
-                except:
-                    pass
         print "ERROR: "+proto.format(*args)
                 
     def msgProgress(self, ID=None):
@@ -279,7 +271,7 @@ class Base(object):
             textProto = "{} {},".format(text, args[0])
             text = textProto.format(*args[1:])
         text += "\n {}".format(failure.getTraceback())
-        self.msgError(text, stop=True)
+        self.msgError(text)
     
     def csvTextToList(self, text, converter):
         if text:

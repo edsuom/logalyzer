@@ -136,6 +136,13 @@ class Transactor(AccessBroker, util.Base):
     """
     I handle transactions for an efficient database of logfile
     entries.
+
+    @ivar ipm: An instance of L{sift.IPMatcher} containing all IP
+      addresses in the database.
+
+    @ivar dtk: An instance of L{DTK} loaded (eventually) with all
+      datetime values in the database.
+    
     """
     valueLength = 255
     directValues = ['ip', 'http', 'was_rd']
@@ -182,6 +189,8 @@ class Transactor(AccessBroker, util.Base):
         )
         self.pendingID = {}
         self.dtk = DTK()
+        self.ipm = IPMatcher()
+        self.ipList = []
         self.idTable = {}
         for name in self.indexedValues:
             self.idTable[name] = {}
@@ -191,12 +200,11 @@ class Transactor(AccessBroker, util.Base):
         
     def preload(self):
         """
-        Loads my DTK and IPMatcher objects from the database, returning a
-        deferred that fires with (1) the IPMatcher object loaded with
-        all IP addresses found in the database, and (2) a list of
-        known-bad IP addresses.
+        Loads my DTK and IPMatcher objects from the database. Returns a
+        C{Deferred} that fires with the number of IPs in the database
+        and a list of known-bad IP addresses.
 
-        You can use the DTK object via I{dtk} in the meantime; doing
+        You can use the DTK object via L{dtk} in the meantime; doing
         so will save you more and more time as the entries load from
         the database.
         """
@@ -207,19 +215,15 @@ class Transactor(AccessBroker, util.Base):
 
         @defer.inlineCallbacks
         def run():
-            # Bad IP addresses
-            ipList = yield self.badIPs()
+            # Load and purge (as needed) bad IP addresses
+            self.ipList = yield self.badIPs()
             # DTK, which we don't need to wait for
-            dDTK = load('dt', self.dtk.set)
-            dDTK.addCallback(lambda _: self.dtk.isPending(False))
+            load('dt', self.dtk.set).addCallback(
+                lambda _: self.dtk.isPending(False))
             # IP matcher, which we do
-            yield load('ip', ipm.addIP, ignoreCache=True)
-            # Now that IP Matcher is loaded, give me an attribute
-            # reference to it
-            self.ipm = ipm
-            defer.returnValue([ipm, ipList])
+            yield load('ip', self.ipm.addIP, ignoreCache=True)
+            defer.returnValue([len(self.ipm), self.ipList])
 
-        ipm = IPMatcher()
         col = self.entries.c
         return self.callWhenRunning(run)
 
@@ -229,25 +233,32 @@ class Transactor(AccessBroker, util.Base):
         Adds all needed database entries for the supplied record at the
         specified datetime.
 
-        Returns a deferred that fires with a Bool indicating if a new
-        entry was added.
+        @return: A C{Deferred} that fires with a bool indicating if a
+          new entry was added.
+        
         """
-        # Build list of values and indexed-value IDs
-        values = [record[x] for x in self.directValues]
-        for name in self.indexedValues:
-            value = record[name][:self.valueLength]
-            if value in self.idTable[name]:
-                # We've set this value already
-                ID = self.idTable[name][value]
-            else:
-                ID = yield self.setNameValue(name, value, niceness=-15)
-                # Add to idTable for future reference, avoiding DB checks
-                self.idTable[name][value] = ID
-            values.append(ID)
-        # With this next line commented out and result = False
-        # instead, the memory leak still persists. CPU time for the
-        # main process was 66% of normal.
-        result = yield self.setEntry(dt, values)
+        ip = record['ip']
+        if ip in self.ipList:
+            # Ignore this, it's from an already purged IP address
+            result = False
+        else:
+            self.ipm.addIP(ip)
+            # Build list of values and indexed-value IDs
+            values = [record[x] for x in self.directValues]
+            for name in self.indexedValues:
+                value = record[name][:self.valueLength]
+                if value in self.idTable[name]:
+                    # We've set this value already
+                    ID = self.idTable[name][value]
+                else:
+                    ID = yield self.setNameValue(name, value, niceness=-15)
+                    # Add to idTable for future reference, avoiding DB checks
+                    self.idTable[name][value] = ID
+                values.append(ID)
+            # With this next line commented out and result = False
+            # instead, the memory leak still persists. CPU time for the
+            # main process was 66% of normal.
+            result = yield self.setEntry(dt, values)
         defer.returnValue(result)
 
     def getRecords(self, dt):
@@ -273,7 +284,7 @@ class Transactor(AccessBroker, util.Base):
         return self.getEntries(dt, consumer=lc).addCallback(done)
         
     @transact
-    def purgeIP(self, ip):
+    def purgeIP(self, ip, ignoreIPM=False):
         """
         Purges the database of entries with the specified IP address,
         returning the (deferred) number of rows that were matched and
@@ -281,9 +292,18 @@ class Transactor(AccessBroker, util.Base):
 
         Also adds it to the DB table of known-bad IP addresses.
         """
-        with self.selex(self.entries.delete) as sh:
-            sh.where(self.entries.c.ip == ip)
-            result = sh().rowcount
+        # The purge
+        if ignoreIPM or self.ipm(ip):
+            # The in-database IP matcher says it's in the database so it
+            # needs to be removed...
+            self.ipm.removeIP(ip)
+            with self.selex(self.entries.delete) as sh:
+                sh.where(self.entries.c.ip == ip)
+                result = sh().rowcount
+        else:
+            # No purge needed
+            result = 0
+        # Update or add to the bad-ip table
         with self.selex(self.bad_ip.c.purged) as sh:
             sh.where(self.bad_ip.c.ip == ip)
             purged = sh().scalar()
@@ -349,7 +369,7 @@ class Transactor(AccessBroker, util.Base):
             rows = sh().fetchall()
         for ip, wasPurged in rows:
             if not wasPurged:
-                self.purgeIP(ip)
+                self.purgeIP(ip, ignoreIPM=True)
             ipList.append(ip)
         return ipList
     
