@@ -146,7 +146,12 @@ class RecordKeeper(Base):
         Returns a deferred that fires when my DB transactor is running and
         my transactor has preloaded its IPMatcher and list of bad IP
         addresses. Fires with the bad-ip list.
+
+        Shows progress loading IP addresses, one dot per 1000 loaded.
         """
+        def progress():
+            self.msgProgress(ID)
+        
         def done(stuff):
             N_ip, ipList = stuff
             self.msgBody(
@@ -156,7 +161,9 @@ class RecordKeeper(Base):
             return ipList
         ID = self.msgHeading("Preloading IP info from DB")
         return self.t.callWhenRunning(
-            self.t.preload).addCallbacks(done, self.oops)
+            self.t.preload,
+            progressCall=progress,
+            N_batch=100, N_progress=1000).addCallbacks(done, self.oops)
         
     def shutdown(self):
         return self.t.shutdown()

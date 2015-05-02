@@ -297,9 +297,11 @@ class Reader(KWParse, Base):
         def dispatch(fileName):
             def gotInfo(result):
                 if result:
-                    dt, N = result
-                    self.msgBody("DB datetime: {}", dt, ID=ID)
-                    if dt == dtFile:
+                    dt, size, N = result
+                    self.msgBody(
+                        "File last parsed with {:d} bytes, timestamp '{}'",
+                        size, dt, ID=ID)
+                    if [dt, size] == fileInfo:
                         self.fileStatus(
                             fileName, "Already loaded, {:d} records", N)
                         return
@@ -323,13 +325,17 @@ class Reader(KWParse, Base):
                 N = consumer.N_parsed
                 self.consumers.remove(consumer)
                 self.msgBody("Parsed {:d} records from {}", N, fileName, ID=ID)
-                return self.rk.fileInfo(fileName, dtFile, N)
+                return self.rk.fileInfo(fileName, fileInfo[0], fileInfo[1], N)
 
             filePath = self.pathInDir(fileName)
             ID = self.msgHeading("Logfile {}...", fileName)
-            dtFile = datetime.fromtimestamp(os.stat(filePath).st_mtime)
+            stat = os.stat(filePath)
+            fileInfo = [int(getattr(stat, x)) for x in ('st_mtime', 'st_size')]
+            fileInfo[0] = datetime.fromtimestamp(fileInfo[0])
             if self.updateOnly:
-                self.msgBody("File datetime: {}", dtFile, ID=ID)
+                self.msgBody(
+                    "File size {:d} bytes, timestamp '{}'",
+                    fileInfo[1], fileInfo[0], ID=ID)
                 return self.rk.fileInfo(
                     fileName).addCallbacks(gotInfo, self.oops)
             return load()

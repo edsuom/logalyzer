@@ -86,6 +86,12 @@ class TestTransactor(TestCase):
                     yield self.t.sql("DROP TABLE {}".format(tableName))
             yield self.t.shutdown()
 
+    def _progress(self):
+        if not hasattr(self, '_pCounter'):
+            self._pCounter = 0
+        self._pCounter += 1
+        return self._pCounter
+            
     @defer.inlineCallbacks
     def test_preload(self):
         # Write four dt-ip combos to DB
@@ -94,7 +100,9 @@ class TestTransactor(TestCase):
                 values = makeEntry(ip, 200, False)
                 yield self.t.insertEntry(dt, values)
         # Do the preload
-        N_ip, ipList = yield self.t.preload()
+        N_ip, ipList = yield self.t.preload(self._progress, 1, 1)
+        # Check that progress calls were made
+        self.assertGreater(self._progress(), 2)
         # No bad ones were defined
         self.assertEqual(ipList, [])
         # Check the IP Matcher

@@ -98,23 +98,35 @@ class PreloadConsumer(object):
     """
     I consume single-item query results, doing the specified f-args-kw
     for each.
+
+    @ivar N: The number of rows between calls to I{progressCall}.
     """
     implements(IConsumer)
 
     def __init__(self, f, **kw):
         self.f = f
         self.kw = kw
+        self.count = 0
+        self.N = kw.pop('N', 100)
+        self.progressCall = kw.pop('progressCall', None)
     
     def registerProducer(self, producer, streaming):
         pass
     def unregisterProducer(self):
         pass
         
-    def write(self, row):
+    def write(self, rows):
         """
-        All I care about is having rows written
+        All I care about is having rows written. If you specified a
+        I{progressCall} to my constructor, I will call it with no
+        argument every I{N} rows.
         """
-        self.f(row[0], **self.kw)
+        for row in rows:
+            self.f(row[0], **self.kw)
+            self.count += 1
+            if not self.count % self.N and callable(self.progressCall):
+                self.progressCall()
+            
 
 
 class RecordConsumer(ListConsumer):
@@ -185,6 +197,7 @@ class Transactor(AccessBroker, util.Base):
             SA.Column(
                 'name', SA.String(self.valueLength), primary_key=True),
             SA.Column('dt', SA.DateTime),
+            SA.Column('bytes', SA.Integer),
             SA.Column('records', SA.Integer),
         )
         self.pendingID = {}
@@ -198,7 +211,7 @@ class Transactor(AccessBroker, util.Base):
     # Public API
     # -------------------------------------------------------------------------
         
-    def preload(self):
+    def preload(self, progressCall=None, N_batch=10, N_progress=100):
         """
         Loads my DTK and IPMatcher objects from the database. Returns a
         C{Deferred} that fires with the number of IPs in the database
@@ -211,7 +224,7 @@ class Transactor(AccessBroker, util.Base):
         def load(colName, f, **kw):
             consumer = PreloadConsumer(f, **kw)
             s = self.select([getattr(col, colName)], distinct=True)
-            return self.selectorator(s, consumer)
+            return self.selectorator(s, consumer, N=N_batch)
 
         @defer.inlineCallbacks
         def run():
@@ -221,7 +234,9 @@ class Transactor(AccessBroker, util.Base):
             load('dt', self.dtk.set).addCallback(
                 lambda _: self.dtk.isPending(False))
             # IP matcher, which we do
-            yield load('ip', self.ipm.addIP, ignoreCache=True)
+            yield load(
+                'ip', self.ipm.addIP,
+                ignoreCache=True, progressCall=progressCall, N=N_progress)
             defer.returnValue([len(self.ipm), self.ipList])
 
         col = self.entries.c
@@ -327,14 +342,16 @@ class Transactor(AccessBroker, util.Base):
     @transact
     def fileInfo(self, fileName, *args):
         """
-        With just fileName, returns the datetime and number of records for
-        the file, if one was processed previously and its results
-        fully reflected in the DB, or C{None}
+        With just I{fileName} as an argument, returns the datetime and
+        number of records for the file, if one was processed
+        previously and its results are fully reflected in the DB, or
+        C{None}
 
-        With two additional arguments of a datetime object and an
-        integer number of records, updates or inserts an entry for the
-        file to indicate that it has been processed and its results
-        are fully reflected in the DB.
+        With three additional arguments of a datetime object, an
+        integer file size (in bytes), and an integer number of
+        records, the method updates or inserts an entry for the file
+        to indicate that it has been processed and its results are
+        fully reflected in the DB.
         """
         cols = self.files.c
         if args:
@@ -343,14 +360,14 @@ class Transactor(AccessBroker, util.Base):
             if self.fileInfo(fileName):
                 self.files.update(
                     cols.name == fileName).execute(
-                        dt=args[0], records=args[1])
+                        dt=args[0], bytes=args[1], records=args[2])
             else:
                 self.files.insert().execute(
-                    name=fileName, dt=args[0], records=args[1])
+                    name=fileName, dt=args[0], bytes=args[1], records=args[2])
             return
         if not self.s("file_info"):
             self.s(
-                [cols.dt, cols.records],
+                [cols.dt, cols.bytes, cols.records],
                 cols.name == SA.bindparam('name'))
         return self.s().execute(name=fileName).first()
 

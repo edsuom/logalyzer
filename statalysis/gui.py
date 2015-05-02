@@ -448,6 +448,7 @@ class GUI(object):
 
     def msgProgress(self, ID):
         self.m.progress(ID)
+        self.update()
         
     def fileStatus(self, fileName, *args):
         """
