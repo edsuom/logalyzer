@@ -319,9 +319,11 @@ class Reader(KWParse, Base):
                 # processes to have it feed the consumer with
                 # misbehaving IP addresses and filtered records
                 return self.pq.call(
-                    self.pr, filePath, consumer=consumer).addCallback(done)
+                    self.pr,
+                    filePath,
+                    consumer=consumer).addCallback(done, consumer)
 
-            def done(consumer):
+            def done(null, consumer):
                 N = consumer.N_parsed
                 self.consumers.remove(consumer)
                 self.msgBody("Parsed {:d} records from {}", N, fileName, ID=ID)
