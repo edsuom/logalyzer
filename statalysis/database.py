@@ -122,11 +122,10 @@ class PreloadConsumer(object):
         argument every I{N} rows.
         """
         for row in rows:
-            self.f(row[0], **self.kw)
+            self.f(row, **self.kw)
             self.count += 1
             if not self.count % self.N and callable(self.progressCall):
                 self.progressCall()
-            
 
 
 class RecordConsumer(ListConsumer):

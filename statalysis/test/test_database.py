@@ -307,17 +307,17 @@ class TestTransactor(TestCase):
         x = yield self.t.fileInfo(file1)
         self.assertEqual(x, None)
         # Set and get
-        yield self.t.fileInfo(file1, dt1, 1234)
+        yield self.t.fileInfo(file1, dt1, 1234, 1000)
         x = yield self.t.fileInfo(file1)
-        self.assertEqual(x, (dt1, 1234))
+        self.assertEqual(x, (dt1, 1234, 1000))
         # Set differently and get
-        yield self.t.fileInfo(file1, dt1, 5678)
+        yield self.t.fileInfo(file1, dt1, 5678, 2000)
         x = yield self.t.fileInfo(file1)
-        self.assertEqual(x, (dt1, 5678))
+        self.assertEqual(x, (dt1, 5678, 2000))
         # Set and get a different file
-        yield self.t.fileInfo(file2, dt2, 5678)
+        yield self.t.fileInfo(file2, dt2, 5678, 2000)
         x = yield self.t.fileInfo(file2)
-        self.assertEqual(x, (dt2, 5678))
+        self.assertEqual(x, (dt2, 5678, 2000))
         
         
         
