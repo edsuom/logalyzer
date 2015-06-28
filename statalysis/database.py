@@ -122,6 +122,8 @@ class PreloadConsumer(object):
         argument every I{N} rows.
         """
         for row in rows:
+            if isinstance(row, SA.engine.RowProxy):
+                row = row[0]
             self.f(row, **self.kw)
             self.count += 1
             if not self.count % self.N and callable(self.progressCall):

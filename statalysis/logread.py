@@ -284,9 +284,60 @@ class Reader(KWParse, Base):
             yield self.pq.shutdown()
             self.msgBody("Process queue stopped", ID=ID)
             # "Wait" for recordkeeper to shut down
-            yield self.rk.shutdown(ID)
+            yield self.rk.shutdown()
             self.msgBody("Record keeper shut down, all done", ID=ID)
 
+    def _dispatch(self, fileName):
+        """
+        Called by L{run} to dispatch parsing jobs to CPU cores.
+        """
+        def gotInfo(result):
+            if result:
+                dt, size, N = result
+                self.msgBody(
+                    "File last parsed with {:d} bytes, timestamp '{}'",
+                    size, dt, ID=ID)
+                if [dt, size] == fileInfo:
+                    self.fileStatus(
+                        fileName, "Already loaded, {:d} records", N)
+                    return
+                self.fileStatus(fileName, "File was updated, reloading")
+            else:
+                self.fileStatus(fileName, "New file")
+            return load()
+
+        def load():
+            self.msgBody("Dispatching file for loading", ID=ID)
+            # Get a ProcessConsumer for this file
+            consumer = self.rk.consumerFactory(fileName)
+            self.consumers.append(consumer)
+            # Call the ProcessReader on one of my subordinate
+            # processes to have it feed the consumer with
+            # misbehaving IP addresses and filtered records
+            return self.pq.call(
+                self.pr,
+                filePath,
+                consumer=consumer).addCallback(done, consumer)
+
+        def done(null, consumer):
+            N = consumer.N_parsed
+            self.consumers.remove(consumer)
+            self.msgBody("Parsed {:d} records from {}", N, fileName, ID=ID)
+            return self.rk.fileInfo(fileName, fileInfo[0], fileInfo[1], N)
+
+        filePath = self.pathInDir(fileName)
+        ID = self.msgHeading("Logfile {}...", fileName)
+        stat = os.stat(filePath)
+        fileInfo = [int(getattr(stat, x)) for x in ('st_mtime', 'st_size')]
+        fileInfo[0] = datetime.fromtimestamp(fileInfo[0])
+        if self.updateOnly:
+            self.msgBody(
+                "File size {:d} bytes, timestamp '{}'",
+                fileInfo[1], fileInfo[0], ID=ID)
+            return self.rk.fileInfo(
+                fileName).addCallbacks(gotInfo, self.oops)
+        return load()
+            
     @defer.inlineCallbacks
     def run(self):
         """
@@ -294,54 +345,6 @@ class Reader(KWParse, Base):
         returning a reference to a list of all IP addresses purged
         during the run.
         """
-        def dispatch(fileName):
-            def gotInfo(result):
-                if result:
-                    dt, size, N = result
-                    self.msgBody(
-                        "File last parsed with {:d} bytes, timestamp '{}'",
-                        size, dt, ID=ID)
-                    if [dt, size] == fileInfo:
-                        self.fileStatus(
-                            fileName, "Already loaded, {:d} records", N)
-                        return
-                    self.fileStatus(fileName, "File was updated, reloading")
-                else:
-                    self.fileStatus(fileName, "New file")
-                return load()
-
-            def load():
-                self.msgBody("Dispatching file for loading", ID=ID)
-                # Get a ProcessConsumer for this file
-                consumer = self.rk.consumerFactory(fileName)
-                self.consumers.append(consumer)
-                # Call the ProcessReader on one of my subordinate
-                # processes to have it feed the consumer with
-                # misbehaving IP addresses and filtered records
-                return self.pq.call(
-                    self.pr,
-                    filePath,
-                    consumer=consumer).addCallback(done, consumer)
-
-            def done(null, consumer):
-                N = consumer.N_parsed
-                self.consumers.remove(consumer)
-                self.msgBody("Parsed {:d} records from {}", N, fileName, ID=ID)
-                return self.rk.fileInfo(fileName, fileInfo[0], fileInfo[1], N)
-
-            filePath = self.pathInDir(fileName)
-            ID = self.msgHeading("Logfile {}...", fileName)
-            stat = os.stat(filePath)
-            fileInfo = [int(getattr(stat, x)) for x in ('st_mtime', 'st_size')]
-            fileInfo[0] = datetime.fromtimestamp(fileInfo[0])
-            if self.updateOnly:
-                self.msgBody(
-                    "File size {:d} bytes, timestamp '{}'",
-                    fileInfo[1], fileInfo[0], ID=ID)
-                return self.rk.fileInfo(
-                    fileName).addCallbacks(gotInfo, self.oops)
-            return load()
-
         dList = []
         self.lock.acquire()
         self.pq = self.getQueue()
@@ -370,7 +373,7 @@ class Reader(KWParse, Base):
             # References to the deferreds from dispatch calls are
             # stored in the process queue, and we wait for their
             # results.
-            d = dispatch(fileName)
+            d = self._dispatch(fileName)
             d.addCallback(lambda _: ds.release())
             dList.append(d)
         self.msgBody(
