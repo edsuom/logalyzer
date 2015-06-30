@@ -20,6 +20,7 @@ import asynqueue
 
 import sift, parse
 from util import Base
+from records import RecordKeeper
 
 
 class KWParse:
@@ -154,7 +155,7 @@ class ProcessReader(KWParse):
         for ip in ipList:
             self.ipm.addIP(ip)
             
-    def __call__(self, fileName):
+    def __call__(self, filePath):
         """
         The public interface to parse a logfile. My processes call this
         via the queue to iterate over misbehaving IP addresses and
@@ -170,7 +171,7 @@ class ProcessReader(KWParse):
         """
         firstLine = True
         self.isRunning = True
-        with self.file(fileName) as fh:
+        with self.file(filePath) as fh:
             for line in fh:
                 if firstLine:
                     firstLine = False
@@ -206,15 +207,13 @@ class Reader(KWParse, Base):
         ('verbose', False), ('info', False), ('warnings', False),
         ('gui', None), ('updateOnly', False))
     
-    def __init__(self, logFiles, rules, dbURL, **kw):
+    def __init__(self, rules, dbURL, **kw):
         self.parseKW(kw)
         self.consumers = []
-        self.fileNames = logFiles
         # Three connections for each concurrent parsing of a logfile:
         # one for each transaction, two for the iterations that may be
         # done during that transaction.
         N_pool = 3*max([1, 2*self.N_processes])
-        from records import RecordKeeper
         self.rk = RecordKeeper(
             dbURL, N_pool,
             verbose=self.verbose, info=self.info, echo=self.warnings,
@@ -281,12 +280,17 @@ class Reader(KWParse, Base):
             yield self.lock.acquireAndRelease()
             self.msgBody("Dispatch loop finished", ID=ID)
             # "Wait" for process queue to shut down
-            yield self.pq.shutdown()
-            self.msgBody("Process queue stopped", ID=ID)
+            if hasattr(self, 'pq'):
+                yield self.pq.shutdown()
+                del self.pq
+                self.msgBody("Process queue stopped", ID=ID)
             # "Wait" for recordkeeper to shut down
-            yield self.rk.shutdown()
-            self.msgBody("Record keeper shut down, all done", ID=ID)
-
+            if hasattr(self, 'rk'):
+                yield self.rk.shutdown()
+                del self.rk
+                self.msgBody("Record keeper shut down", ID=ID)
+            self.msgBody("All done", ID=ID)
+    
     def _dispatch(self, fileName):
         """
         Called by L{run} to dispatch parsing jobs to CPU cores.
@@ -339,7 +343,7 @@ class Reader(KWParse, Base):
         return load()
             
     @defer.inlineCallbacks
-    def run(self):
+    def run(self, fileNames):
         """
         Runs everything via the process queue (multiprocessing!),
         returning a reference to a list of all IP addresses purged
@@ -349,7 +353,7 @@ class Reader(KWParse, Base):
         self.lock.acquire()
         self.pq = self.getQueue()
         ID = self.msgHeading(
-            "Dispatching {:d} parsing jobs", len(self.fileNames))
+            "Dispatching {:d} parsing jobs", len(fileNames))
         # We have at most two files being parsed concurrently for each
         # worker servicing my process queue
         ds = defer.DeferredSemaphore(min([self.N, 2*len(self.pq)]))
@@ -361,7 +365,7 @@ class Reader(KWParse, Base):
         yield self.pq.update(self.pr.ignoreIPs, ipList)
 
         # Dispatch files as permitted by the semaphore
-        for fileName in self.fileNames:
+        for fileName in fileNames:
             if not self.isRunning():
                 break
             # "Wait" for the number of concurrent parsings to fall

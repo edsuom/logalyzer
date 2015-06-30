@@ -20,10 +20,6 @@ import util
 from sift import IPMatcher
 
 
-# DEBUG
-from asynqueue.info import showResult
-
-
 class DTK(object):
     """
     I maintain a CPU-efficient but somewhat memory expensive lookup

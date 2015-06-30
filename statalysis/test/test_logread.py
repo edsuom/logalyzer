@@ -26,8 +26,6 @@ class TestProcessReader(TestCase):
     verbose = True
 
     def setUp(self):
-        logFiles = [
-            os.path.join(moduleDir(), 'log', 'access.log')]
         self.rules = {'BotMatcher': RULES_BOT}
         self.r = logread.ProcessReader({})
         self.m = self.r.m
@@ -36,7 +34,7 @@ class TestProcessReader(TestCase):
         return ua.endswith('bot')
 
     def botMatcher(self, ip, url):
-        if ".php" in url:
+        if url.endswith(('.php', '.js')):
             return True
         return False
         
@@ -93,22 +91,53 @@ class TestProcessReader(TestCase):
         self.assertIsInstance(result[1], dict)
         self.assertTrue(len(result[1]) > 5)
 
+    def _checkParsing(self, fileName, N1, N2):
+        yielded = {}
+        filePath = fileInModuleDir(fileName)
+        with self.matcher('botMatcher'):
+            for stuff in self.r(filePath):
+                yielded.setdefault(type(stuff), []).append(stuff)
+        self.assertGreater(
+            len(yielded), 0, "Nothing was parsed from {}".format(fileName))
+        self.assertGreaterEqual(len(yielded[str]), N1)
+        self.assertGreaterEqual(len(yielded[tuple]), N2)
+        
+    def test_call_oldFormat(self):
+        return self._checkParsing("access.log.1", 2, 10)
+
+    def test_call_newFormat(self):
+        return self._checkParsing("access.log.2", 1, 10)
+
 
 class TestReader(TestCase):
-    verbose = True
-    
+    verbose = False
+
     def setUp(self):
-        logFiles = [
-            os.path.join(moduleDir(), 'log', 'access.log')]
         self.rules = {'BotMatcher': RULES_BOT}
         self.r = logread.Reader(
-            logFiles, self.rules, DB_URL,
+            self.rules, DB_URL,
             cores=1, verbose=self.isVerbose())
+        self.r.myDir = moduleDir()
         self.t = self.r.rk.t
+
+    @defer.inlineCallbacks
+    def tearDown(self):
+        yield self.r.shutdown()
+        
+    def test_getMatchers(self):
+        matchers = self.r.getMatchers(self.rules)
+        self.assertEqual(
+            matchers.keys(), ['BotMatcher'])
+        import sift
+        self.assertIsInstance(
+            matchers['BotMatcher'], sift.BotMatcher)
+    
+    def test_dispatch(self):
+        pass
        
     @defer.inlineCallbacks
     def test_run(self):
-        ipList = yield self.r.run().addErrback(self.oops)
+        ipList = yield self.r.run(["access.log.1"]).addErrback(self.oops)
         self.msg("Dispatch loop done, got {:d} bad IP addresses", len(ipList))
         self.assertIsInstance(ipList, list)
         self.assertTrue(len(ipList) > 1)
@@ -117,8 +146,8 @@ class TestReader(TestCase):
         N = yield self.t.hitsForIP(ip)
         msg = "Expected at least {:d} records for IP '{}', got {:d}".format(
             Ne, ip, N)
-        self.assertGreater(N, Ne, msg)
-        yield self.r.shutdown()
+        self.assertGreaterEqual(N, Ne, msg)
+
         
 
             

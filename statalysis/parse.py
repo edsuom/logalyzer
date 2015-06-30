@@ -30,7 +30,7 @@ class RedirectChecker(object):
     def __call__(self, vhost, ip, http):
         """
         Checks if this vhost is the destination of a redirect from another
-        one, and replace it with the old one if so.
+        one, and replaces it with the old one if so.
 
         Returns a 2-tuple containing a Bool that indicates if this was
         a redirect, and the vhost (the original if so).
@@ -159,8 +159,6 @@ class LineParser(object):
         match = self.reTwistdPrefix.match(line)
         if match:
             dt = self.dtFactory(*match.groups()[:6])
-            if match.group(7) == '-':
-                return
             line = match.group(8)
         match = self.reCLF.match(line)
         if match is None:

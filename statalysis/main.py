@@ -251,7 +251,7 @@ class Recorder(Base):
         """
         rules = self.loadRules()
         return logread.Reader(
-            self.logFiles, rules, dbURL,
+            rules, dbURL,
             cores=self.opt['cores'],
             exclude=self.csvTextToList(self.opt['e'], int),
             ignoreSecondary=self.opt['y'],
@@ -274,7 +274,7 @@ class Recorder(Base):
             elif reactor.running:
                 reactor.stop()
         # Almost all of my time is spent in this next line
-        return self.reader.run().addCallbacks(done, self.oops)
+        return self.reader.run(self.logFiles).addCallbacks(done, self.oops)
 
     def consolidate(self, outPath):
         """
