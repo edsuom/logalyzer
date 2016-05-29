@@ -47,32 +47,25 @@ OPTIONS
 Exclude HTTP code(s) (comma separated list, no spaces)
 
 -d, --ruledir ruledir
-Directory for .net, .ua, and .url file(s) containing IP, user-agent,
-and url exclusion rules
+Directory for .net, .ua, and .url file(s) containing IP, user-agent, and url exclusion rules
 
 -i, --ip rules
-Rules corresponding to .ip files in ruledir containing IP addresses
-aaa.bbb.ccc.ddd notation
+Rules corresponding to .ip files in ruledir containing IP addresses aaa.bbb.ccc.ddd notation
 
 -n, --net rules
-Rules corresponding to .net files in ruledir containing IP network
-exclusion rules in aaa.bbb.ccc.ddd/ee notation
+Rules corresponding to .net files in ruledir containing IP network exclusion rules in aaa.bbb.ccc.ddd/ee notation
 
 -u, --ua rules
-Rules corresponding to .ua files containing regular expressions (case
-sensitive) that match User-Agent strings to exclude
+Rules corresponding to .ua files containing regular expressions (case sensitive) that match User-Agent strings to exclude
 
 -b, --bot rules
-Rules corresponding to .url files containing regular expressions (case
-sensitive) that match url strings indicating a malicious bot
+Rules corresponding to .url files containing regular expressions (case sensitive) that match url strings indicating a malicious bot
 
 -r, --referrer rules
-Rules corresponding to .ref files containing regular expressions (case
-sensitive) that match referrer strings indicating a malicious bot
+Rules corresponding to .ref files containing regular expressions (case sensitive) that match referrer strings indicating a malicious bot
 
 -o, --vhost rules
-Rules corresponding to .vhost files containing regular expressions (case
-sensitive) that match virtual host requests indicating a malicious bot
+Rules corresponding to .vhost files containing regular expressions (case sensitive) that match virtual host requests indicating a malicious bot
 
 -y, --secondary
 Ignore secondary files (css, webfonts, images)
@@ -81,17 +74,13 @@ Ignore secondary files (css, webfonts, images)
 Compare logfile timestamps to stored versions in the DB and only parse if newer
 
 -s, --save file
-File in which to save a list of the purged (or consolidated) IP
-addresses, in ascending numerical order with repeats omitted.
+File in which to save a list of the purged (or consolidated) IP addresses, in ascending numerical order with repeats omitted.
 
 -c, --consolidate
-Just consolidate IP addresses in the <file> with those in the ip rules
-(-i), saving that to the file specified with -s. Ignores logfiles and
-net, ua, bot, and ref rules, and doesn't generate any csv file
+Just consolidate IP addresses in the <file> with those in the ip rules (-i), saving that to the file specified with -s. Ignores logfiles and net, ua, bot, and ref rules, and doesn't generate any csv file
 
 --cores N
-The number of CPU cores (really, python processes) to run in
-parallel. Set to 0 and the queue will run in a threadpool instead.
+The number of CPU cores (really, python processes) to run in parallel. Set to 0 and the queue will run in a threadpool instead.
 
 -v, --verbose
 Run verbosely
