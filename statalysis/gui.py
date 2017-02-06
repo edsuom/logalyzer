@@ -12,7 +12,7 @@ import sys, math
 from twisted.internet import reactor, defer
 import twisted.python.log
 
-from asynqueue import Info
+from asynqueue.info import Info
 
 import urwid as u
 from urwid.raw_display import Screen
