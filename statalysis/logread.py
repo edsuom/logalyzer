@@ -286,9 +286,7 @@ class Reader(KWParse, Base):
                 self.msgBody("Process queue stopped", ID=ID)
             # "Wait" for recordkeeper to shut down
             if hasattr(self, 'rk'):
-                print "RK-1"
                 yield self.rk.shutdown()
-                print "RK-2"
                 del self.rk
                 self.msgBody("Record keeper shut down", ID=ID)
             self.msgBody("All done", ID=ID)

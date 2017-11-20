@@ -14,7 +14,7 @@ from twisted.internet.interfaces import IConsumer
 from asynqueue.info import showResult, whichThread
 from asynqueue.iteration import ListConsumer
 
-from sasync.database import transact, SA, AccessBroker
+from sasync.database import transact, wait, SA, AccessBroker
 
 import util
 from sift import IPMatcher
@@ -205,13 +205,6 @@ class Transactor(AccessBroker, util.Base):
         for name in self.indexedValues:
             self.idTable[name] = {}
 
-    def shutdown(self):
-        """
-        Ensures that methods decorated with @wait have all fired their
-        deferreds before initiating shutdown.
-
-        TODO: Make part of the sAsync API.
-        """
             
     # Public API
     # -------------------------------------------------------------------------
@@ -247,6 +240,7 @@ class Transactor(AccessBroker, util.Base):
         col = self.entries.c
         return self.callWhenRunning(run)
 
+    @wait
     @defer.inlineCallbacks
     def setRecord(self, dt, record):
         """
@@ -281,6 +275,7 @@ class Transactor(AccessBroker, util.Base):
             result = yield self.setEntry(dt, values)
         defer.returnValue(result)
 
+    @wait
     def getRecords(self, dt):
         """
         Returns a (deferred) list of all the records for the specified
