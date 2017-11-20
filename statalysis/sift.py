@@ -30,6 +30,9 @@ class MatcherBase(object):
         self.startup(clean)
 
     def reFromRules(self, rules):
+        if not rules:
+            print "WARNING: Empty rules for {}".format(self)
+            return
         reParts = []
         for rule in rules:
             rule = rule.strip()
@@ -239,7 +242,7 @@ class ReMatcherBase(MatcherBase):
             return True
         # Sometimes offenders start with an innocent query, so no
         # cache for innocents
-        if self.re.search(string.strip()):
+        if self.re and self.re.search(string.strip()):
             # Offender found
             self.cm.set(0, ip)
             return True

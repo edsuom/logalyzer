@@ -265,6 +265,9 @@ class Reader(KWParse, Base):
             # Signal dispatch loop to quit
             self._shutdownFlag = None
             ID = self.msgHeading("Reader shutting down...")
+            # "Wait" for lock
+            yield self.lock.acquireAndRelease()
+            self.msgBody("Dispatch loop finished", ID=ID)
             # Delete my consumers and "wait" for them to stop their
             # producers
             dList = []
@@ -276,9 +279,6 @@ class Reader(KWParse, Base):
                     "Stopped {:d} active consumers", len(dList), ID=ID)
             else:
                 self.msgBody("No consumers active", ID=ID)
-            # "Wait" for lock
-            yield self.lock.acquireAndRelease()
-            self.msgBody("Dispatch loop finished", ID=ID)
             # "Wait" for process queue to shut down
             if hasattr(self, 'pq'):
                 yield self.pq.shutdown()
@@ -286,7 +286,9 @@ class Reader(KWParse, Base):
                 self.msgBody("Process queue stopped", ID=ID)
             # "Wait" for recordkeeper to shut down
             if hasattr(self, 'rk'):
+                print "RK-1"
                 yield self.rk.shutdown()
+                print "RK-2"
                 del self.rk
                 self.msgBody("Record keeper shut down", ID=ID)
             self.msgBody("All done", ID=ID)

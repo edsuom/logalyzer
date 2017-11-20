@@ -359,3 +359,80 @@ class Base(object):
         import gc
         gc.set_debug(gc.DEBUG_LEAK)
     
+
+class Args(object):
+    """
+    Convenience class by Edwin A. Suominen for compact and sensible
+    commandline argument parsing. The code of this class, separate
+    from the rest of this module and package, is dedicated to the
+    public domain.
+
+    Usage: Construct an instance with a text description of your
+    application. Then call the instance for each option you want to
+    add, with a short letter (just a single letter) preceded by a
+    single hyphen ("-"), a long option preceded by a pair of hyphens
+    ("--"), a default value if the option isn't just C{store_true},
+    and a text description of the option.
+
+    You will access the option value using the short letter value,
+    which gives you 26 possibilities for options (52 if you use both
+    upper and lowercase). If you need more than that, you may be
+    overcomplicating your command line.
+
+    You can also call the instance once to set a variable for any
+    positional arguments. The arguments for that call are a letter (no
+    preceding hyphen) for the name of the variable holding the
+    sequence of any positional arguments the user provides, a default
+    value if any, and a text description of the positional arguments.
+
+    The instance will look exactly like an L{argparse.ArgumentParser}
+    object, all set up and ready to have its attributes accessed.
+    """
+    def __init__(self, text):
+        self.args = None
+        import argparse
+        self.parser = argparse.ArgumentParser(description=text)
+
+    def __nonzero__(self):
+        return any([
+            bool(getattr(self.args, x))
+            for x in dir(self.args) if not x.startswith('_')])
+
+    def addDefault(self, text, default, dest=None):
+        if dest and '{}' in text: text = text.format(dest)
+        if "default" not in text.lower():
+            text += " [{}]".format(default)
+        return text
+    
+    def __call__(self, *args):
+        if len(args) == 4:
+            shortArg, longArg, default, helpText = args
+            dest = shortArg[1:]
+            helpText = self.addDefault(helpText, default, dest)
+            self.parser.add_argument(
+                shortArg, longArg, dest=dest, default=default,
+                action='store', type=type(default), help=helpText)
+            return
+        if len(args) == 3:
+            if args[0].startswith('-'):
+                shortArg, longArg, helpText = args
+                self.parser.add_argument(
+                    shortArg, longArg, dest=shortArg[1:],
+                    action='store_true', help=helpText)
+                return
+            dest, default, helpText = args
+            helpText = self.addDefault(helpText, default)
+            self.parser.add_argument(
+                dest, default=default, type=type(default),
+                nargs='?', help=helpText)
+            return
+        if len(args) == 2:
+            dest, helpText = args
+            self.parser.add_argument(
+                dest, default=None, nargs='?', help=helpText)
+            return
+
+    def __getattr__(self, name):
+        if self.args is None:
+            self.args = self.parser.parse_args()
+        return getattr(self.args, name, None)

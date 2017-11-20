@@ -204,7 +204,15 @@ class Transactor(AccessBroker, util.Base):
         self.idTable = {}
         for name in self.indexedValues:
             self.idTable[name] = {}
-        
+
+    def shutdown(self):
+        """
+        Ensures that methods decorated with @wait have all fired their
+        deferreds before initiating shutdown.
+
+        TODO: Make part of the sAsync API.
+        """
+            
     # Public API
     # -------------------------------------------------------------------------
         

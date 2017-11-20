@@ -140,6 +140,7 @@ class RecordKeeper(Base):
         self.verbose = verbose
         self.info = info
         self.gui = gui
+        self.dt = DeferredTracker()
 
     def startup(self):
         """
@@ -166,7 +167,11 @@ class RecordKeeper(Base):
             N_batch=100, N_progress=1000).addCallbacks(done, self.oops)
         
     def shutdown(self):
-        return self.t.shutdown()
+        def done(null):
+            print "SD-RK-2"
+            return self.t.shutdown()
+        print "SD-RK-1"
+        return self.dt.deferToAll().addCallback(done)
 
     def consumerFactory(self, fileName, msgID=None):
         """
@@ -209,8 +214,10 @@ class RecordKeeper(Base):
         # Add to this session's purge (and ignore) list and update the
         # DB accordingly
         self.t.ipList.append(ip)
-        return self.t.purgeIP(
+        d = self.t.purgeIP(
             ip, niceness=15).addCallbacks(donePurging, self.oops)
+        self.dt.put(d)
+        return d
 
     def addRecord(self, dt, record):
         """
@@ -224,7 +231,9 @@ class RecordKeeper(Base):
         Returns a deferred that fires with a Bool indicating if a new
         entry was added to the database.
         """
-        return self.t.setRecord(dt, record).addErrback(self.oops)
+        d = self.t.setRecord(dt, record).addErrback(self.oops)
+        self.dt.put(d)
+        return d
 
     def getNewIPs(self):
         """

@@ -93,7 +93,7 @@ class LineParser(object):
     """
     reTwistdPrefix = rc(
         rdb("-", 4, 2, 2),              # 1111-22-33
-        rdb(":", 2, 2, 2) + r'\+\d+',   # 44-55-66
+        rdb(":", 2, 2, 2) + r'\+\d+',   # 44:55:66+0000
         r'\[(.+?)\]',                   # 7+
         r'(.+)'                         # 8+ (= CLF portion)
         )
@@ -103,6 +103,7 @@ class LineParser(object):
         r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',        # 1
         # vhost
         r'([\w\-\.]+)',                                 # 2
+        # -
         r'\-',
         # [Date/time block]
         r'\[(.+?)\]',                                   # 3

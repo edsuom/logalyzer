@@ -47,7 +47,7 @@ OPTIONS
 Exclude HTTP code(s) (comma separated list, no spaces)
 
 -d, --ruledir ruledir
-Directory for .net, .ua, and .url file(s) containing IP, user-agent, and url exclusion rules
+Directory for .net, .ua, and .url file(s) containing IP, user-agent, and url exclusion rules (default: ./rules)
 
 -i, --ip rules
 Rules corresponding to .ip files in ruledir containing IP addresses aaa.bbb.ccc.ddd notation
@@ -99,9 +99,11 @@ LICENSE
 Copyright (C) 2015 Tellectual LLC
 """
 
+import os.path
+
 from twisted.internet import reactor, defer
 
-from util import Base
+from util import Base #, Args (TODO: Use Args class instead of ezopt)
 from writer import IPWriter
 import logread, gui
 
@@ -222,7 +224,7 @@ class Recorder(Base):
         """
         rulesDir = self.opt['d']
         if rulesDir is None:
-            rulesDir = self.myDir
+            rulesDir = os.path.join(self.myDir, 'rules')
         rules = {}
         rr = RuleReader(rulesDir, gui=self.gui, verbose=self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
