@@ -279,16 +279,16 @@ class Reader(KWParse, Base):
                     "Stopped {:d} active consumers", len(dList), ID=ID)
             else:
                 self.msgBody("No consumers active", ID=ID)
-            # "Wait" for process queue to shut down
-            if hasattr(self, 'pq'):
-                yield self.pq.shutdown()
-                del self.pq
-                self.msgBody("Process queue stopped", ID=ID)
             # "Wait" for recordkeeper to shut down
             if hasattr(self, 'rk'):
                 yield self.rk.shutdown()
                 del self.rk
                 self.msgBody("Record keeper shut down", ID=ID)
+            # "Wait" for process queue to shut down
+            if hasattr(self, 'pq'):
+                yield self.pq.shutdown()
+                del self.pq
+                self.msgBody("Process queue stopped", ID=ID)
             self.msgBody("All done", ID=ID)
     
     def _dispatch(self, fileName):
