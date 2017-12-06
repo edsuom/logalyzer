@@ -302,8 +302,8 @@ class StdSubstitute(object):
             self.gui.error("Twisted Error: {}", text)
         else:
             self.gui.warning("Twisted Message: {}", text)
-        
-    
+
+            
 class GUI(object):
     """
     I am the main curses interface.
@@ -363,12 +363,13 @@ class GUI(object):
         self.loop = u.MainLoop(
             main, screen=self.screen,
             unhandled_input=possiblyQuit, event_loop=eventLoop)
+        reactor.addSystemEventTrigger('after', 'shutdown', self.stop)
         #sys.stdout = StdSubstitute('STDOUT', self)
         sys.stderr = observer = StdSubstitute('STDERR', self)
         twisted.python.log.addObserver(observer)
         self.running = True
         self.loop.start()
-        
+    
     def _dims(self):
         # Deduct 4 from each dimension due to outline and padding
         return [x-4 for x in self.screen.get_cols_rows()]
@@ -391,6 +392,7 @@ class GUI(object):
         L{main.Recorder.shutdown} after all other shutdown steps are
         done, as part of the Twisted reactor shutdown.
         """
+        print "STOP"
         if self.running and not hasattr(self, '_shutdownFlag'):
             self._shutdownFlag = None
             self.running = False

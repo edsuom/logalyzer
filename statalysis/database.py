@@ -476,7 +476,7 @@ class Transactor(AccessBroker, util.Base):
         """
         col = self.entries.c
         if not self.s('s_entry'):
-            cList = ['id']
+            cList = [self.entries.c.id]
             cList += [getattr(col, x) for x in self.colNames]
             self.s(cList, col.dt == SA.bindparam('dt'))
         return self.s().execute(dt=dt)

@@ -23,6 +23,10 @@ from util import Base
 from records import RecordKeeper
 
 
+# PROFILING
+from util import profile
+
+
 class KWParse:
     """
     Subclass me, define a list of name-default keyword options via the
@@ -173,6 +177,7 @@ class ProcessReader(KWParse):
         self.isRunning = True
         with self.file(filePath) as fh:
             for line in fh:
+                #print line
                 if firstLine:
                     firstLine = False
                     # Check first non-blank line for possible vhost
@@ -290,7 +295,8 @@ class Reader(KWParse, Base):
                 del self.pq
                 self.msgBody("Process queue stopped", ID=ID)
             self.msgBody("All done", ID=ID)
-    
+
+    #@profile
     def _dispatch(self, fileName):
         """
         Called by L{run} to dispatch parsing jobs to CPU cores.
@@ -341,7 +347,7 @@ class Reader(KWParse, Base):
             return self.rk.fileInfo(
                 fileName).addCallbacks(gotInfo, self.oops)
         return load()
-            
+
     @defer.inlineCallbacks
     def run(self, fileNames):
         """
@@ -391,6 +397,5 @@ class Reader(KWParse, Base):
         self.lock.release()
         # Fire result deferred with list of bad IPs
         defer.returnValue(ipList)
-
 
 

@@ -31,6 +31,32 @@ def rc(*parts):
     return re.compile(rexp)
 
 
+def profile(f, *args, **kw):
+    def done(result):
+        with open('theseus.out', 'wb') as fh:
+            t.write_data(fh)
+        t.uninstall()
+        pr.disable()
+        import pstats
+        with open('profile.out', 'wb') as fh:
+            ps = pstats.Stats(pr, stream=fh).sort_stats('cumulative')
+            ps.print_stats()
+        return result
+    
+    def substituteFunction(*args, **kw):
+        d = f(*args, **kw)
+        d.addCallback(done)
+        return d
+
+    from cProfile import Profile
+    pr = Profile()
+    pr.enable()
+    from theseus import Tracer
+    t = Tracer(); t.install()
+    substituteFunction.func_name = f.func_name
+    return substituteFunction
+
+
 class DatabaseError(Exception):
     """
     Incompatible database.

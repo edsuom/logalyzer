@@ -190,13 +190,10 @@ class Recorder(Base):
         down, and this is it. Let the reactor call it automatically
         when you do a reactor.stop().
         """
-        def done(null):
-            if self.gui:
-                self.gui.stop()
         if hasattr(self, 'triggerID'):
             reactor.removeSystemEventTrigger(self.triggerID)
             del self.triggerID
-        return self.reader.shutdown().addBoth(done)
+        return self.reader.shutdown()
         
     def parseArgs(self):
         args = list(self.opt)

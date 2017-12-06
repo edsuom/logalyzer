@@ -41,7 +41,7 @@ def deferToDelay(delay=5):
 
 
 class Display(object):
-    lifetime = 10 # seconds
+    lifetime = 5 # seconds
     
     def __init__(self, palette=None):
         # A screen is useful to have right away
@@ -69,7 +69,6 @@ class Display(object):
             main, screen=self.screen,
             unhandled_input=possiblyQuit,
             event_loop=eventLoop)
-        reactor.addSystemEventTrigger('before', 'shutdown', self.stop)
         self.loop.start()
 
     def width(self):
@@ -124,7 +123,7 @@ class TestPalette(TestCase):
     def test_colors(self):
         for name in [x[0] for x in self.palette]:
             self.w.body.append(u.Text((name, name + self.alphabet)))
-        return self.showBriefly(20)
+        return self.showBriefly(5)
     
 
 class TestMessageBox(TestCase):
