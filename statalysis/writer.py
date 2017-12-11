@@ -32,14 +32,13 @@ class IPWriter(Base):
             q.insert(1, '0')
         return sum(long(byte) << 8 * index for index, byte in enumerate(q))
     
-    def writeIPs(self, ipList, filePath):
+    def writeIPs(self, rejectedIPs, filePath):
         """
-        Writes the supplied list of ip addresses, in numerical order and
-        with no repeats, to the specified filePath.
+        Writes the blocked IPs in the supplied dict of ip addresses, in
+        numerical order, to the specified filePath.
         """
-        ipLast = None
+        ipList = sorted(rejectedIPs.keys(), key=self.ipToLong)
         with open(filePath, 'w') as fh:
-            for ip in sorted(ipList, key=self.ipToLong):
-                if ip != ipLast:
+            for ip in ipList:
+                if rejectedIPs[ip]:
                     fh.write(ip + '\n')
-                    ipLast = ip

@@ -74,17 +74,25 @@ class ProcessReader(KWParse):
         This is where most of the processing time gets spent.
 
         Given one line of a logfile, returns one of the following
-        three types:
+        three types of result:
 
-        * A C{None} object if the logfile line was rejected.
+        * For a bogus or ignored logfile line where there's no IP
+          address parsed or other entries from an IP address that was
+          parsed aren't to be affected, C{None}.
+        
+        * For a rejected logfile line, a 2-tuple with (1) a string
+          containing the dotted-quad form of an IP address whose
+          behavior or source caused the line to be rejected from
+          inclusion in logfile analysis, followed by (2) C{False} if
+          we are only interested in ignoring its logfile entries, or
+          C{True} if the IP address's behavior was so egregious as to
+          be blocked from further web access as well as being ignored
+          from logfile analysis.
 
-        * A string containing the dotted-quad form of an IP address
-          whose behavior not only caused the line to be rejected but
-          also all other lines from that IP address
-
-        * A 2-tuple containing a datetime object and a dict describing
-          the record for the logfile valid line. The dict contains the
-          following entries::
+        * For an accepted logfile line, a 2-tuple containing (1) a
+          datetime object and (2) a dict describing the record for the
+          logfile valid line. The dict contains the following
+          entries::
 
             ip:     Requestor IP address
             http:   HTTP code
@@ -112,8 +120,8 @@ class ProcessReader(KWParse):
             return
         vhost, ip, dt, url, http, ref, ua = stuff
         # First and fastest of all is checking for known bad guys. We
-        # check our dedicated purged-IP matcher and then an IP matcher
-        # for 'ip' rules, if any.
+        # check our dedicated blocked-IP matcher and then an IP
+        # matcher for 'ip' rules, if any.
         if self.ipm(ip) or self.m.ipMatcher(ip):
             return
         # Now check for secondary file, if we are ignoring those
@@ -125,14 +133,14 @@ class ProcessReader(KWParse):
         if self.m.botMatcher(ip, url) or self.m.refMatcher(ip, ref):
             # Misbehaving IP
             self.ipm.addIP(ip)
-            return ip
+            return ip, True
         if self.exclude:
             if http in self.exclude:
                 # Excluded code
                 return
         if self.m.uaMatcher(ip, ua):
             # Excluded UA string
-            return
+            return ip, False
         # OK, this is an approved record ... unless the requested
         # vhost is bogus or there is an IP address match
         record = {
@@ -140,21 +148,24 @@ class ProcessReader(KWParse):
             'url': url, 'ref': ref, 'ua': ua }
         record['was_rd'], vhost = self.rc(vhost, ip, http)
         if self.m.vhostMatcher(ip, vhost):
-            # Excluded vhost, consider this IP misbehaving also
+            # Excluded vhost, consider this IP misbehaving also, with
+            # extreme prejudice
             self.ipm.addIP(ip)
-            return ip
+            return ip, True
         record['vhost'] = vhost
         # The last and by FAR the most time-consuming check is for
         # excluded networks. Only done if all other checks have
-        # passed.
+        # passed. Don't block these ip addresses because your own
+        # fetches might be among them, if you select to ignore your
+        # own home ip addresses.
         if self.m.netMatcher(ip):
-            return
+            return ip, False
         return dt, record
 
     def ignoreIPs(self, ipList):
         """
         The supervising process may call this with a list of IP addresses
-        to be rejected as I continue parsing.
+        to be summarily rejected as I continue parsing.
         """
         for ip in ipList:
             self.ipm.addIP(ip)
@@ -316,6 +327,21 @@ class Reader(KWParse, Base):
                 self.fileStatus(fileName, "New file")
             return load()
 
+        def done(null, consumer):
+            N = consumer.N_parsed
+            self.consumers.remove(consumer)
+            self.msgBody("Parsed {:d} records from {}", N, fileName, ID=ID)
+            # Update file info for this log file
+            d1 = self.rk.fileInfo(fileName, fileInfo[0], fileInfo[1], N)
+            # Advise all ProcessReaders of newly identified IP
+            # addresses that are being blocked so that they can skip
+            # over any log entries from them.
+            ipList = self.rk.getNewBlockedIPs()
+            d2 = self.pq.update(self.pr.ignoreIPs, ipList)
+            # The delay involved with updating the workers and
+            # updating the database can be concurrent.
+            return defer.DeferredList([d1, d2])
+        
         def load():
             self.msgBody("Dispatching file for loading", ID=ID)
             # Get a ProcessConsumer for this file
@@ -328,12 +354,6 @@ class Reader(KWParse, Base):
                 self.pr,
                 filePath,
                 consumer=consumer).addCallback(done, consumer)
-
-        def done(null, consumer):
-            N = consumer.N_parsed
-            self.consumers.remove(consumer)
-            self.msgBody("Parsed {:d} records from {}", N, fileName, ID=ID)
-            return self.rk.fileInfo(fileName, fileInfo[0], fileInfo[1], N)
 
         filePath = self.pathInDir(fileName)
         ID = self.msgHeading("Logfile {}...", fileName)
@@ -363,13 +383,9 @@ class Reader(KWParse, Base):
         # We have at most two files being parsed concurrently for each
         # worker servicing my process queue
         ds = defer.DeferredSemaphore(min([self.N, 2*len(self.pq)]))
-        # "Wait" for everything to start up and get a list of
-        # known-bad IP addresses
-        ipList = yield self.rk.startup()
+        # "Wait" for everything to start up
+        yield self.rk.startup()
         
-        # Warn workers to ignore records from the bad IPs
-        yield self.pq.update(self.pr.ignoreIPs, ipList)
-
         # Dispatch files as permitted by the semaphore
         for fileName in fileNames:
             if not self.isRunning():

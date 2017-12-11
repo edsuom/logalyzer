@@ -268,9 +268,8 @@ class Base(object):
     def msgError(self, proto, *args):
         if self.gui:
             self.gui.error(proto, *args)
-            if stop:
-                self.linger(True)
-                return self.deferToDelay(10)
+            self.linger(True)
+            return self.deferToDelay(10)
         print "ERROR: "+proto.format(*args)
                 
     def msgProgress(self, ID=None):

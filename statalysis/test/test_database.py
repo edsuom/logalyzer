@@ -100,11 +100,9 @@ class TestTransactor(TestCase):
                 values = makeEntry(ip, 200, False)
                 yield self.t.insertEntry(dt, values)
         # Do the preload
-        N_ip, ipList = yield self.t.preload(self._progress, 1, 1)
+        N_ip = yield self.t.preload(self._progress, 1, 1)
         # Check that progress calls were made
         self.assertGreater(self._progress(), 2)
-        # No bad ones were defined
-        self.assertEqual(ipList, [])
         # Check the IP Matcher
         for ip, expected in ((ip1, True), (ip2, True), ("192.168.1.1", False)):
             self.assertEqual(self.t.ipm(ip), expected)

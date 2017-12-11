@@ -185,11 +185,6 @@ class Transactor(AccessBroker, util.Base):
                 unique_value=['value']
             )
         yield self.table(
-            'bad_ip',
-            SA.Column('ip', SA.String(15), primary_key=True),
-            SA.Column('purged', SA.Boolean, nullable=False),
-        )
-        yield self.table(
             'files',
             SA.Column(
                 'name', SA.String(self.valueLength), primary_key=True),
@@ -200,8 +195,8 @@ class Transactor(AccessBroker, util.Base):
         self.pendingID = {}
         self.dtk = DTK()
         self.ipm = IPMatcher()
-        self.ipList = []
         self.idTable = {}
+        self.rejectedIPs = []
         for name in self.indexedValues:
             self.idTable[name] = {}
 
@@ -211,9 +206,8 @@ class Transactor(AccessBroker, util.Base):
         
     def preload(self, progressCall=None, N_batch=10, N_progress=100):
         """
-        Loads my DTK and IPMatcher objects from the database. Returns a
-        C{Deferred} that fires with the number of IPs in the database
-        and a list of known-bad IP addresses.
+        Loads my DTK object from the database. Returns a C{Deferred} that
+        fires with the number of IPs in the database.
 
         You can use the DTK object via L{dtk} in the meantime; doing
         so will save you more and more time as the entries load from
@@ -226,8 +220,6 @@ class Transactor(AccessBroker, util.Base):
 
         @defer.inlineCallbacks
         def run():
-            # Load and purge (as needed) bad IP addresses
-            self.ipList = yield self.badIPs()
             # DTK, which we don't need to wait for
             load('dt', self.dtk.set).addCallback(
                 lambda _: self.dtk.isPending(False))
@@ -235,7 +227,7 @@ class Transactor(AccessBroker, util.Base):
             yield load(
                 'ip', self.ipm.addIP,
                 ignoreCache=True, progressCall=progressCall, N=N_progress)
-            defer.returnValue([len(self.ipm), self.ipList])
+            defer.returnValue(len(self.ipm))
 
         col = self.entries.c
         return self.callWhenRunning(run)
@@ -252,7 +244,7 @@ class Transactor(AccessBroker, util.Base):
         
         """
         ip = record['ip']
-        if ip in self.ipList:
+        if ip in self.rejectedIPs:
             # Ignore this, it's from an already purged IP address
             result = False
         else:
@@ -304,8 +296,6 @@ class Transactor(AccessBroker, util.Base):
         Purges the database of entries with the specified IP address,
         returning the (deferred) number of rows that were matched and
         presumably deleted.
-
-        Also adds it to the DB table of known-bad IP addresses.
         """
         # The purge
         if ignoreIPM or self.ipm(ip):
@@ -318,14 +308,6 @@ class Transactor(AccessBroker, util.Base):
         else:
             # No purge needed
             result = 0
-        # Update or add to the bad-ip table
-        with self.selex(self.bad_ip.c.purged) as sh:
-            sh.where(self.bad_ip.c.ip == ip)
-            purged = sh().scalar()
-        if purged is None:
-            self.bad_ip.insert().execute(ip=ip, purged=True)
-        elif not purged:
-            self.bad_ip.update(self.bad_ip.c.ip==ip).execute(purged=True)
         return result
 
     @transact
@@ -374,22 +356,6 @@ class Transactor(AccessBroker, util.Base):
     # More or less internal methods
     # -------------------------------------------------------------------------
 
-    @transact
-    def badIPs(self):
-        """
-        Purges any entries with IP addresses in the "bad IP" table that
-        haven't been marked as purged already. Returns a list of all
-        the bad IP addresses.
-        """
-        ipList = []
-        with self.selex(self.bad_ip.c.ip, self.bad_ip.c.purged) as sh:
-            rows = sh().fetchall()
-        for ip, wasPurged in rows:
-            if not wasPurged:
-                self.purgeIP(ip, ignoreIPM=True)
-            ipList.append(ip)
-        return ipList
-    
     @transact
     def insertEntry(self, dt, values):
         """

@@ -76,9 +76,6 @@ Compare logfile timestamps to stored versions in the DB and only parse if newer
 -s, --save file
 File in which to save a list of the purged (or consolidated) IP addresses, in ascending numerical order with repeats omitted.
 
--c, --consolidate
-Just consolidate IP addresses in the <file> with those in the ip rules (-i), saving that to the file specified with -s. Ignores logfiles and net, ua, bot, and ref rules, and doesn't generate any csv file
-
 --cores N
 The number of CPU cores (really, python processes) to run in parallel. Set to 0 and the queue will run in a threadpool instead.
 
@@ -212,12 +209,10 @@ class Recorder(Base):
             raise RuntimeError(
                 "No logfiles specified or in current directory")
 
-    def loadRules(self, consolidate=False):
+    def loadRules(self):
         """
-        Loads rules per your command-line options. If I am in consolidate
-        mode, just returns a list of the ip addresses from the
-        selected ip rules. Otherwise returns a dict of sifters loaded
-        with all the selected rules.
+        Loads rules per your command-line options. Returns a dict of
+        sifters loaded with all the selected rules.
         """
         rulesDir = self.opt['d']
         if rulesDir is None:
@@ -227,10 +222,6 @@ class Recorder(Base):
         for optKey, extension, matcherName in self.ruleTable:
             theseRules = rr.rules(extension, self.opt[optKey])
             rules[matcherName] = theseRules
-            if consolidate and extension == 'ip':
-                # All we do in consolidate mode is read the ip
-                # rules.
-                return theseRules
         return rules
         
     def readerFactory(self, dbURL):
@@ -250,11 +241,11 @@ class Recorder(Base):
         """
         This is where it all happens.
         """
-        def done(ipList):
+        def done(rejectedIPs):
             filePath = self.opt['s']
             if filePath:
                 w = IPWriter()
-                w.writeIPs(ipList, filePath)
+                w.writeIPs(rejectedIPs, filePath)
             self.msgHeading("Done")
             if self.gui:
                 if self.reader.isRunning():
@@ -263,24 +254,8 @@ class Recorder(Base):
                 reactor.stop()
         # Almost all of my time is spent in this next line
         return self.reader.run(self.logFiles).addCallbacks(done, self.oops)
-
-    def consolidate(self, outPath):
-        """
-        Consolidates dotted-quad addresses from selected ip rules with the
-        ones in my command-line filePath(s).
-        """
-        ipList = self.loadRules(consolidate=True)
-        rr = RuleReader()
-        for filePath in self.opt:
-            ipList.extend(rr.lines(filePath))
-        w = IPWriter()
-        w.writeIPs(ipList, outPath)
     
     def run(self):
-        if self.opt['c']:
-            outPath = self.opt['s']
-            self.consolidate(outPath)
-            return
         self.parseArgs()
         # GUI, if -g option
         if self.opt['g']:

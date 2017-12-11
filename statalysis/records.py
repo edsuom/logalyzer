@@ -14,6 +14,7 @@ from twisted.internet.interfaces import IConsumer
 from asynqueue.util import DeferredTracker
 
 from util import Base
+from sift import IPMatcher
 import database
 
 
@@ -92,9 +93,9 @@ class ProcessConsumer(Base):
 
         if not hasattr(self, 'rk'):
             return
-        if isinstance(data, str):
+        if isinstance(data[0], str):
             # No need to pause producer for a mere IP address
-            d = self.rk.purgeIP(data)
+            d = self.rk.purgeIP(*data)
             # With both disabled, usage was file; VM=316MB, RM=111MB
             # No worse with this enabled
         else:
@@ -141,25 +142,24 @@ class RecordKeeper(Base):
         self.t = database.Transactor(
             dbURL, pool_size=N_pool, verbose=echo, echo=echo)
         self.dt = DeferredTracker()
+        # There will be no repeated checks of the same IP in my usage
+        # of the IP matcher, so the cache would only slow things down
+        self.ipm = IPMatcher(noCache=True)
 
     def startup(self):
         """
         Returns a deferred that fires when my DB transactor is running and
-        my transactor has preloaded its IPMatcher and list of bad IP
-        addresses. Fires with the bad-ip list.
+        my transactor has preloaded its IPMatcher.
 
         Shows progress loading IP addresses, one dot per 1000 loaded.
         """
         def progress():
             self.msgProgress(ID)
         
-        def done(stuff):
-            N_ip, ipList = stuff
+        def done(N_ip):
             self.msgBody(
-                "DB has records from {:d} IP addresses and warns "+\
-                "of {:d} known bad ones",
-                N_ip, len(ipList), ID=ID)
-            return ipList
+                "DB has records from {:d} IP addresses", N_ip, ID=ID)
+
         ID = self.msgHeading("Preloading IP info from DB")
         return self.t.callWhenRunning(
             self.t.preload,
@@ -169,6 +169,18 @@ class RecordKeeper(Base):
     def shutdown(self):
         return self.dt.deferToAll().addCallbacks(lambda _: self.t.shutdown())
 
+    def getNewBlockedIPs(self):
+        """
+        Returns a list of those rejected IP addresses that are to be
+        blocked and were identified since the last call to this method.
+        """
+        ipList = []
+        for ip in self.t.rejectedIPs:
+            if self.t.rejectedIPs[ip] and not self.ipm(ip):
+                self.ipm.addIP(ip)
+                ipList.append(ip)
+        return ipList
+    
     def consumerFactory(self, fileName, msgID=None):
         """
         Constructs and returns a reference to a new L{ProcessConsumer}
@@ -184,14 +196,14 @@ class RecordKeeper(Base):
         """
         return self.t.fileInfo(*args)
         
-    def purgeIP(self, ip):
+    def purgeIP(self, ip, block):
         """
         Purges my records (and database, if any) of entries from the
         supplied IP address and appends the IP to a list to be
         returned when I'm done so that a master list of purged IP
         addresses can be provided. Any further adds from this IP are
         ignored.
-
+        
         @return: A C{Deferred} that fires when the database has been
           updated, or immediately if no database transaction is
           needed.
@@ -203,13 +215,17 @@ class RecordKeeper(Base):
 
         if not hasattr(self, 'purgeMsgID'):
             self.purgeMsgID = self.msgHeading("Purging IP addresses")
-        if ip in self.t.ipList:
-            # This IP address was already purged during this session,
-            # don't even go to the queue
+        if ip in self.t.rejectedIPs:
+            # This IP address was already purged during this session
+            if block and not self.t.rejectedIPs[ip]:
+                # but not as a blocked IP, and this time it's been bad
+                # enough for a block, so change its status
+                self.t.rejectedIPs[ip] = True
+            # Don't even bother going to the queue
             return defer.succeed(None)
         # Add to this session's purge (and ignore) list and update the
         # DB accordingly
-        self.t.ipList.append(ip)
+        self.t.rejectedIPs[ip] = block
         d = self.t.purgeIP(ip, niceness=15)
         d.addCallbacks(donePurging, self.oops)
         self.dt.put(d)

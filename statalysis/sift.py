@@ -20,7 +20,8 @@ class MatcherBase(object):
     """
     Build your matcher on me
     """
-    def __init__(self, rules=[]):
+    def __init__(self, rules=[], noCache=False):
+        self.useCache = not noCache
         clean = []
         for rule in rules:
             rule = rule.strip()
@@ -48,7 +49,6 @@ class MatcherBase(object):
         raise NotImplementedError("Must define a startup method")
     
 
-
 class IPMatcher(MatcherBase):
     """
     I efficiently match IP addresses. Simple and fast.
@@ -59,14 +59,16 @@ class IPMatcher(MatcherBase):
     """
     def startup(self, rules):
         self.N = 0
+
         # Lookup table for hashed ip strings
         self.ipHashes = array.array('L')
         for ip in rules:
             self.addIP(ip, ignoreCache=True)
-        # Cache for hits
-        self.cm.new(20)
-        # Cache for misses
-        self.cm.new(20)
+        if self.useCache:
+            # Cache for hits
+            self.cm.new(20)
+            # Cache for misses
+            self.cm.new(20)
 
     def __len__(self):
         return len(self.ipHashes)
@@ -88,7 +90,7 @@ class IPMatcher(MatcherBase):
         if it's not already there.
         """
         # Clear the misses cache of this IP
-        if not ignoreCache:
+        if self.useCache and not ignoreCache:
             self.cm.clear(1, ip)
         # Add the hash if it's not already in my list
         ipHash = self.dqToHash(ip)
@@ -113,7 +115,8 @@ class IPMatcher(MatcherBase):
         list if it's there.
         """
         # Clear the hits cache of this IP
-        self.cm.clear(0, ip)
+        if self.useCache:
+            self.cm.clear(0, ip)
         ipHash = self.dqToHash(ip)
         if self.hasHash(ipHash):
             self.ipHashes.remove(ipHash)
@@ -141,18 +144,21 @@ class IPMatcher(MatcherBase):
     def __call__(self, ip):
         # Likely to be several sequential hits from hits and
         # misses alike
-        if self.cm.check(0, ip):
-            # Hit was cached
-            return True
-        if self.cm.check(1, ip):
-            # Miss was cached
-            return False
+        if self.useCache:
+            if self.cm.check(0, ip):
+                # Hit was cached
+                return True
+            if self.cm.check(1, ip):
+                # Miss was cached
+                return False
         if self.hasHash(self.dqToHash(ip)):
             # IP found
-            self.cm.set(0, ip)
+            if self.useCache:
+                self.cm.set(0, ip)
             return True
         # No IP address match
-        self.cm.set(1, ip)
+        if self.useCache:
+            self.cm.set(1, ip)
         return False
 
 

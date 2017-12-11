@@ -25,7 +25,7 @@ class TestRecordKeeper(TestCase):
     
     @defer.inlineCallbacks
     def tearDown(self):
-        for tableName in ('entries', 'bad_ip'):
+        for tableName in ('entries',):
             if hasattr(self.t, tableName):
                 yield self.t.sql("DROP TABLE {}".format(tableName))
         yield self.rk.shutdown()
