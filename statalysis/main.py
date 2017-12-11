@@ -73,8 +73,11 @@ Ignore secondary files (css, webfonts, images)
 -t, --timestamp
 Compare logfile timestamps to stored versions in the DB and only parse if newer
 
+-f, --load file
+File of blocked IP addresses to pre-load into the sifter. You can specify the same file as the file for blocked IP addresses to be saved into (with -s). Preloading will speed things up considerably, but don't use it in a run immediately after changing rules.
+
 -s, --save file
-File in which to save a list of the purged (or consolidated) IP addresses, in ascending numerical order with repeats omitted.
+File in which to save a list of blocked IP addresses, in ascending numerical order.
 
 --cores N
 The number of CPU cores (really, python processes) to run in parallel. Set to 0 and the queue will run in a threadpool instead.
@@ -228,12 +231,22 @@ class Recorder(Base):
         """
         I generate and return a log reader with all its rules loaded 
         """
+        preloaded = []
+        filePath = self.opt['f']
+        if filePath and os.path.exists(filePath):
+            with open(filePath) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    preloaded.append(line)
         rules = self.loadRules()
         return logread.Reader(
             rules, dbURL,
             cores=self.opt['cores'],
             exclude=self.csvTextToList(self.opt['e'], int),
             ignoreSecondary=self.opt['y'],
+            blockedIPs=preloaded,
             verbose=self.verbose, info=self.opt['info'],
             warnings=self.opt['w'], gui=self.gui, updateOnly=self.opt['t'])
 

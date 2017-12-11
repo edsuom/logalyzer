@@ -153,7 +153,6 @@ class Transactor(AccessBroker, util.Base):
       datetime values in the database.
     
     """
-    valueLength = 255
     directValues = ['ip', 'http', 'was_rd']
     indexedValues = ['vhost', 'url', 'ref', 'ua']
     colNames = directValues +\
@@ -181,13 +180,13 @@ class Transactor(AccessBroker, util.Base):
             yield self.table(
                 name,
                 SA.Column('id', SA.Integer, primary_key=True),
-                SA.Column('value', SA.String(self.valueLength)),
+                SA.Column('value', SA.String(255)),
                 unique_value=['value']
             )
         yield self.table(
             'files',
             SA.Column(
-                'name', SA.String(self.valueLength), primary_key=True),
+                'name', SA.String(255), primary_key=True),
             SA.Column('dt', SA.DateTime),
             SA.Column('bytes', SA.Integer),
             SA.Column('records', SA.Integer),
@@ -196,7 +195,6 @@ class Transactor(AccessBroker, util.Base):
         self.dtk = DTK()
         self.ipm = IPMatcher()
         self.idTable = {}
-        self.rejectedIPs = {}
         for name in self.indexedValues:
             self.idTable[name] = {}
 
@@ -243,28 +241,23 @@ class Transactor(AccessBroker, util.Base):
           new entry was added.
         
         """
-        ip = record['ip']
-        if ip in self.rejectedIPs:
-            # Ignore this, it's from an already purged IP address
-            result = False
-        else:
-            self.ipm.addIP(ip)
-            # Build list of values and indexed-value IDs
-            values = [record[x] for x in self.directValues]
-            for name in self.indexedValues:
-                value = record[name][:self.valueLength]
-                if value in self.idTable[name]:
-                    # We've set this value already
-                    ID = self.idTable[name][value]
-                else:
-                    ID = yield self.setNameValue(name, value, niceness=-15)
-                    # Add to idTable for future reference, avoiding DB checks
-                    self.idTable[name][value] = ID
-                values.append(ID)
-            # With this next line commented out and result = False
-            # instead, the memory leak still persists. CPU time for the
-            # main process was 66% of normal.
-            result = yield self.setEntry(dt, values)
+        self.ipm.addIP(record['ip'])
+        # Build list of values and indexed-value IDs
+        values = [record[x] for x in self.directValues]
+        for name in self.indexedValues:
+            value = record[name][:255]
+            if value in self.idTable[name]:
+                # We've set this value already
+                ID = self.idTable[name][value]
+            else:
+                ID = yield self.setNameValue(name, value, niceness=-15)
+                # Add to idTable for future reference, avoiding DB checks
+                self.idTable[name][value] = ID
+            values.append(ID)
+        # With this next line commented out and result = False
+        # instead, the memory leak still persists. CPU time for the
+        # main process was 66% of normal.
+        result = yield self.setEntry(dt, values)
         defer.returnValue(result)
 
     @wait

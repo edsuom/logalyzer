@@ -37,6 +37,7 @@ class ProcessConsumer(Base):
         self.verbose = verbose
         self.gui = gui
         self.dt = DeferredTracker()
+        self.N_backLog = 0
     
     def registerProducer(self, producer, streaming):
         if hasattr(self, 'producer'):
@@ -76,7 +77,8 @@ class ProcessConsumer(Base):
 
     def write(self, data):
         def done(wasAdded):
-            if hasattr(self, 'producer'):
+            self.N_backLog -= 1
+            if self.N_backLog < 10 and hasattr(self, 'producer'):
                 self.producer.resumeProducing()
             if hasattr(self, 'rk'):
                 self.N_parsed += 1
@@ -99,11 +101,13 @@ class ProcessConsumer(Base):
             # With both disabled, usage was file; VM=316MB, RM=111MB
             # No worse with this enabled
         else:
-            # Writing records can take long enough to pause the
-            # producer until it's done. That keeps my DB transaction
-            # queue's memory usage from ballooning with a backlog of
-            # pending records.
-            self.producer.pauseProducing()
+            # Writing records can take a while, so pause the producer
+            # until it's done if there's a backlog. That keeps my DB
+            # transaction queue's memory usage from ballooning with
+            # too many pending records.
+            self.N_backLog += 1
+            if self.N_backLog > 10:
+                self.producer.pauseProducing()
             # Major memory leak was caused by the callback, in GUI
             # mode: It added a little over 5,000 bytes per record
             # parsed to the memory usage.
@@ -132,10 +136,13 @@ class RecordKeeper(Base):
     I{ipm} attributes to avoid database activity.
 
     """
+    progressUpdateInterval = 1000
+    
     def __init__(
-            self, dbURL, N_pool,
+            self, dbURL, N_pool, blockedIPs,
             verbose=False, info=False, echo=False, gui=None):
         # ---------------------------------------------------------------------
+        self.rejectedIPs = dict.fromkeys(blockedIPs, True)
         self.verbose = verbose
         self.info = info
         self.gui = gui
@@ -151,21 +158,21 @@ class RecordKeeper(Base):
         Returns a deferred that fires when my DB transactor is running and
         my transactor has preloaded its IPMatcher.
 
-        Shows progress loading IP addresses, one dot per 1000 loaded.
+        Shows progress loading IP addresses, one update per 1000 loaded.
         """
         def progress():
-            self.msgProgress(ID)
+            self.msgProgress(ID, self.progressUpdateInterval)
         
         def done(N_ip):
-            self.rejectedIPs = self.t.rejectedIPs
             self.msgBody(
                 "DB has records from {:d} IP addresses", N_ip, ID=ID)
 
         ID = self.msgHeading("Preloading IP info from DB")
         return self.t.callWhenRunning(
             self.t.preload,
-            progressCall=progress,
-            N_batch=100, N_progress=1000).addCallbacks(done, self.oops)
+            progressCall=progress, N_batch=100,
+            N_progress=self.progressUpdateInterval).addCallbacks(
+                done, self.oops)
         
     def shutdown(self):
         return self.dt.deferToAll().addCallbacks(lambda _: self.t.shutdown())
@@ -211,8 +218,7 @@ class RecordKeeper(Base):
         
         """
         def donePurging(N):
-            if N:
-                self.msgProgress(self.purgeMsgID)
+            if N: self.msgProgress(self.purgeMsgID, N)
 
         if not hasattr(self, 'purgeMsgID'):
             self.purgeMsgID = self.msgHeading("Purging IP addresses")
@@ -244,6 +250,8 @@ class RecordKeeper(Base):
         Returns a deferred that fires with a Bool indicating if a new
         entry was added to the database.
         """
+        if record['ip'] in self.rejectedIPs:
+            return defer.succeed(False)
         d = self.t.setRecord(dt, record)
         d.addErrback(self.oops)
         self.dt.put(d)

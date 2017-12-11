@@ -272,12 +272,12 @@ class Base(object):
             return self.deferToDelay(10)
         print "ERROR: "+proto.format(*args)
                 
-    def msgProgress(self, ID=None):
+    def msgProgress(self, ID=None, N=1):
         if not self.gui:
             return
         if ID is None:
             ID = self._headingID
-        self.gui.msgProgress(ID)
+        self.gui.msgProgress(ID, N)
             
     def fileStatus(self, fileName, *args):
         if self.gui:

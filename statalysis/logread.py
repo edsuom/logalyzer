@@ -120,10 +120,13 @@ class ProcessReader(KWParse):
             return
         vhost, ip, dt, url, http, ref, ua = stuff
         # First and fastest of all is checking for known bad guys. We
-        # check our dedicated blocked-IP matcher and then an IP
-        # matcher for 'ip' rules, if any.
-        if self.ipm(ip) or self.m.ipMatcher(ip):
+        # check our dedicated blocked-IP matcher.
+        if self.ipm(ip):
             return
+        # Now (also very fast), check for specified IP addresses to
+        # ignore but not block
+        if self.m.ipMatcher(ip):
+            return ip, False
         # Now check for secondary file, if we are ignoring those
         if self.ignoreSecondary and self.reSecondary.search(url):
             return
@@ -219,7 +222,7 @@ class Reader(KWParse, Base):
     
     keyWords = (
         ('cores', None),
-        ('exclude', []), ('ignoreSecondary', False),
+        ('exclude', []), ('ignoreSecondary', False), ('blockedIPs', []),
         ('verbose', False), ('info', False), ('warnings', False),
         ('gui', None), ('updateOnly', False))
     
@@ -231,7 +234,7 @@ class Reader(KWParse, Base):
         # done during that transaction.
         N_pool = 3*max([1, 2*self.N_processes])
         self.rk = RecordKeeper(
-            dbURL, N_pool,
+            dbURL, N_pool, self.blockedIPs,
             verbose=self.verbose, info=self.info, echo=self.warnings,
             gui=self.gui)
         self.pr = ProcessReader(

@@ -45,19 +45,19 @@ class MessageBox(u.ListBox):
         self.setCurrent(True)
         self.height += 1
 
-    def progress(self):
+    def progress(self, N):
         """
-        Call this to establish an incrementing line of dots as a progress
-        bar under my heading, and call each time a new dot is desired.
+        Call this to establish a progress counter and increment it by I{N}
+        with each new call.
         """
         def pcText():
-            return ('message', "."*self.pc)
+            return ('message', "-- {:d} --".format(self.pc))
         
         if hasattr(self, 'pc'):
-            self.pc += 1
+            self.pc += N
             self.pcWidget.set_text(pcText())
         else:
-            self.pc = 1
+            self.pc = N
             self.pcWidget = u.Text(pcText())
             self.body.append(self.pcWidget)
             self.height += 1
@@ -138,9 +138,9 @@ class Messages(u.ListBox):
         msgBox = self.adapt(MessageBox(msgText), height=height)
         self.body.append(msgBox)
 
-    def progress(self, ID):
+    def progress(self, ID, N):
         for msgBox in self._boxerator(ID):
-            msgBox.progress()
+            msgBox.progress(N)
 
 
 class ProgressText(u.Text):
@@ -448,8 +448,8 @@ class GUI(object):
         self.m.distinctMsg('error', textProto.format(*args))
         self.update()
 
-    def msgProgress(self, ID):
-        self.m.progress(ID)
+    def msgProgress(self, ID, N):
+        self.m.progress(ID, N)
         self.update()
         
     def fileStatus(self, fileName, *args):
