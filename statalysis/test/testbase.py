@@ -305,6 +305,8 @@ Java/
 wget
 curl
 libwww
+yandex
+baidu
 """.split('\n')
 
 RULES_BOT = """
@@ -694,8 +696,18 @@ class TestCase(MsgBase, unittest.TestCase):
         if obj is not None:
             if msg:
                 msg = "\n" + msg
-            self.fail("Expected <None>, got '{}'{}".str(obj, msg))
+            self.fail("Expected <None>, got '{}' {}".str(obj, msg))
 
     def assertNotNone(self, obj, msg=""):
         if obj is None:
             self.fail(msg)
+
+    def assertRecord(self, obj, **kw):
+        self.assertIsInstance(obj, tuple, "Not a record, not even a tuple")
+        self.assertIsInstance(obj[0], dt, "First element not a datetime")
+        self.assertIsInstance(obj[1], dict, "Second element not a dict")
+        self.assertIn('http', obj[1])
+        self.assertTrue(len(obj[1]) > 5)
+        for name, value in kw.iteritems():
+            self.assertEqual(obj[1][name], value)
+                              

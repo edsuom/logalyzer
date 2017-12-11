@@ -40,7 +40,7 @@ class TestRecordKeeper(TestCase):
         self.assertTrue(self.t.ipm(ip1))
         # Purge an IP address. In the test, we wait for the purge, but
         # not in real life.
-        yield self.rk.purgeIP(ip1)
+        yield self.rk.purgeIP(ip1, False)
         # IPM after purge
         self.assertFalse(self.t.ipm(ip1), ip1)
         # Make sure it's not in the DB anymore, either

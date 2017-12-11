@@ -26,12 +26,16 @@ class TestProcessReader(TestCase):
     verbose = True
 
     def setUp(self):
-        self.rules = {'BotMatcher': RULES_BOT}
+        self.rules = {'BotMatcher': RULES_BOT, 'UAMatcher': RULES_UA}
         self.r = logread.ProcessReader({})
         self.m = self.r.m
 
     def uaMatcher(self, ip, ua):
-        return ua.endswith('bot')
+        if 'bot' in ua:
+            return True
+        if 'yandex' in ua:
+            return True
+        return False
 
     def botMatcher(self, ip, url):
         if url.endswith(('.php', '.js')):
@@ -62,15 +66,17 @@ class TestProcessReader(TestCase):
             if expectReject:
                 self.assertNone(result, http)
             else:
-                self.assertNotNone(result, http)
+                self.assertRecord(result, http=http)
         self.r.exclude = []
         for http in (200, 301, 400, 404):
-            self.assertNotNone(mr(http, "-", "-"))
+            self.assertRecord(mr(http, "-", "-"))
         stuffBase.append(200)
         # Excluded UA
         with self.matcher('uaMatcher'):
-            self.assertNotNone(mr("-", "Mozilla innocent browser/1.2"))
-            self.assertNone(mr("-", "I am a bot"))
+            self.assertRecord(mr("-", "Mozilla innocent browser/1.2"))
+            ignoredResult = mr("-", "I am a bot")
+            self.assertIsInstance(ignoredResult[0], str)
+            self.assertFalse(ignoredResult[1])
         # Excluded URL
         with self.matcher('botMatcher'):
             stuffBase = stuffBase[:-2]
@@ -79,7 +85,7 @@ class TestProcessReader(TestCase):
             self.assertIsInstance(mr("/", *tail), tuple)
             # ... malicious URL
             result = mr("/foo/wp-login.php", *tail)
-            self.assertEqual(result, ip1)
+            self.assertEqual(list(result), [ip1, True])
         # Innocent record, still rejected until IP matcher cleared
         args = (
             "/index.html", 302, "http://greatsite.com/", "Awesome browser/2.3")
@@ -87,27 +93,49 @@ class TestProcessReader(TestCase):
         self.assertNone(result)
         self.r.ipm.removeIP(ip1)
         result = mr(*args)
-        self.assertEqual(result[0], dtStuff)
-        self.assertIsInstance(result[1], dict)
-        self.assertTrue(len(result[1]) > 5)
+        self.assertRecord(result)
 
-    def _checkParsing(self, fileName, N1, N2):
+    def _checkParsing(self, fileName, matcher, **kw):
         yielded = {}
         filePath = fileInModuleDir(fileName)
-        with self.matcher('botMatcher'):
+        counts = {'ignored': 0, 'blocked': 0, 'accepted': 0}
+        with self.matcher(matcher):
             for stuff in self.r(filePath):
-                yielded.setdefault(type(stuff), []).append(stuff)
+                self.assertIsInstance(stuff, (list, tuple))
+                self.assertEqual(len(stuff), 2)
+                if isinstance(stuff[0], str):
+                    if stuff[1]:
+                        counts['blocked'] += 1
+                    else:
+                        counts['ignored'] += 1
+                    continue
+                counts['accepted'] += 1
         self.assertGreater(
-            len(yielded), 0, "Nothing was parsed from {}".format(fileName))
-        self.assertGreaterEqual(len(yielded[str]), N1)
-        self.assertGreaterEqual(len(yielded[tuple]), N2)
-        
-    def test_call_oldFormat(self):
-        return self._checkParsing("access.log.1", 2, 10)
+            max(counts.values()), 0,
+            "Nothing was parsed from {}".format(fileName))
+        for name, value in kw.iteritems():
+            self.assertEqual(
+                counts[name], value,
+                "Had {:d} counts of type '{}', not {:d}".format(
+                    counts[name], name, value))
+    
+    def test_call_oldFormat_bot(self):
+        return self._checkParsing(
+            "access.log.1", 'botMatcher', accepted=64, blocked=2, ignored=0)
 
-    def test_call_newFormat(self):
-        return self._checkParsing("access.log.2", 1, 10)
+    def test_call_newFormat_bot(self):
+        return self._checkParsing(
+            "access.log.2", 'botMatcher', accepted=104, blocked=3, ignored=0)
 
+    def test_call_oldFormat_ua(self):
+        return self._checkParsing(
+            "access.log.1", 'uaMatcher', accepted=260, blocked=0, ignored=6)
+
+    def test_call_newFormat_ua(self):
+        return self._checkParsing(
+            "access.log.2", 'uaMatcher', accepted=88, blocked=0, ignored=26)
+
+    
 
 class TestReader(TestCase):
     verbose = False
@@ -137,10 +165,15 @@ class TestReader(TestCase):
        
     @defer.inlineCallbacks
     def test_run(self):
-        ipList = yield self.r.run(["access.log.1"]).addErrback(self.oops)
-        self.msg("Dispatch loop done, got {:d} bad IP addresses", len(ipList))
-        self.assertIsInstance(ipList, list)
-        self.assertTrue(len(ipList) > 1)
+        rejectedIPs = yield self.r.run(["access.log.1"]).addErrback(self.oops)
+        self.msg(
+            "Dispatch loop done, got {:d} bad IP addresses",
+            len(rejectedIPs))
+        self.assertIsInstance(rejectedIPs, dict)
+        for ip in rejectedIPs:
+            self.assertIsInstance(ip, str)
+            self.assertIsInstance(rejectedIPs[ip], bool)
+        self.assertTrue(len(rejectedIPs) > 1)
         Ne = 2
         ip = "207.216.252.13"
         N = yield self.t.hitsForIP(ip)

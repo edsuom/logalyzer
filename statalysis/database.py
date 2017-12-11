@@ -196,7 +196,7 @@ class Transactor(AccessBroker, util.Base):
         self.dtk = DTK()
         self.ipm = IPMatcher()
         self.idTable = {}
-        self.rejectedIPs = []
+        self.rejectedIPs = {}
         for name in self.indexedValues:
             self.idTable[name] = {}
 

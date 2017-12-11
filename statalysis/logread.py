@@ -128,8 +128,8 @@ class ProcessReader(KWParse):
         if self.ignoreSecondary and self.reSecondary.search(url):
             return
         # Then do some relatively easy exclusion checks, starting with
-        # botMatcher and refMatcher so we can harvest the most bot IP
-        # addresses (useful if -i option set)
+        # botMatcher and refMatcher so we can harvest the most blocked
+        # IP addresses
         if self.m.botMatcher(ip, url) or self.m.refMatcher(ip, ref):
             # Misbehaving IP
             self.ipm.addIP(ip)
@@ -139,7 +139,8 @@ class ProcessReader(KWParse):
                 # Excluded code
                 return
         if self.m.uaMatcher(ip, ua):
-            # Excluded UA string
+            # Excluded UA string. We may ignore but never block based
+            # just on UA, even if it's a bot.
             return ip, False
         # OK, this is an approved record ... unless the requested
         # vhost is bogus or there is an IP address match
@@ -148,18 +149,17 @@ class ProcessReader(KWParse):
             'url': url, 'ref': ref, 'ua': ua }
         record['was_rd'], vhost = self.rc(vhost, ip, http)
         if self.m.vhostMatcher(ip, vhost):
-            # Excluded vhost, consider this IP misbehaving also, with
-            # extreme prejudice
+            # Excluded vhost, consider this IP misbehaving also, and block
             self.ipm.addIP(ip)
             return ip, True
         record['vhost'] = vhost
         # The last and by FAR the most time-consuming check is for
         # excluded networks. Only done if all other checks have
-        # passed. Don't block these ip addresses because your own
-        # fetches might be among them, if you select to ignore your
-        # own home ip addresses.
+        # passed. If you use the blocked IP list, don't include
+        # anything here that would include an IP address you want to
+        # have accessing your server!
         if self.m.netMatcher(ip):
-            return ip, False
+            return ip, True
         return dt, record
 
     def ignoreIPs(self, ipList):
@@ -406,12 +406,12 @@ class Reader(KWParse, Base):
             "Done dispatching, awaiting {:d} last results",
             ds.limit-ds.tokens, ID=ID)
         yield defer.DeferredList(dList)
-        ipList = self.rk.getNewIPs()
         self.msgBody(
-            "Identified {:d} misbehaving IP addresses", len(ipList), ID=ID)
+            "Rejected {:d} IP addresses, of which {:d} were blocked",
+            len(self.rk.rejectedIPs), sum(self.rk.rejectedIPs.values()), ID=ID)
         # Can now shut down, regularly or due to interruption
         self.lock.release()
         # Fire result deferred with list of bad IPs
-        defer.returnValue(ipList)
+        defer.returnValue(self.rk.rejectedIPs)
 
 

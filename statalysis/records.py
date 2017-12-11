@@ -157,6 +157,7 @@ class RecordKeeper(Base):
             self.msgProgress(ID)
         
         def done(N_ip):
+            self.rejectedIPs = self.t.rejectedIPs
             self.msgBody(
                 "DB has records from {:d} IP addresses", N_ip, ID=ID)
 
@@ -175,8 +176,8 @@ class RecordKeeper(Base):
         blocked and were identified since the last call to this method.
         """
         ipList = []
-        for ip in self.t.rejectedIPs:
-            if self.t.rejectedIPs[ip] and not self.ipm(ip):
+        for ip in self.rejectedIPs:
+            if self.rejectedIPs[ip] and not self.ipm(ip):
                 self.ipm.addIP(ip)
                 ipList.append(ip)
         return ipList
@@ -215,17 +216,17 @@ class RecordKeeper(Base):
 
         if not hasattr(self, 'purgeMsgID'):
             self.purgeMsgID = self.msgHeading("Purging IP addresses")
-        if ip in self.t.rejectedIPs:
+        if ip in self.rejectedIPs:
             # This IP address was already purged during this session
-            if block and not self.t.rejectedIPs[ip]:
+            if block and not self.rejectedIPs[ip]:
                 # but not as a blocked IP, and this time it's been bad
                 # enough for a block, so change its status
-                self.t.rejectedIPs[ip] = True
+                self.rejectedIPs[ip] = True
             # Don't even bother going to the queue
             return defer.succeed(None)
         # Add to this session's purge (and ignore) list and update the
         # DB accordingly
-        self.t.rejectedIPs[ip] = block
+        self.rejectedIPs[ip] = block
         d = self.t.purgeIP(ip, niceness=15)
         d.addCallbacks(donePurging, self.oops)
         self.dt.put(d)
@@ -247,17 +248,5 @@ class RecordKeeper(Base):
         d.addErrback(self.oops)
         self.dt.put(d)
         return d
-
-    def getNewIPs(self):
-        """
-        Returns a list of purged IP addresses that have been added since
-        the last time this method was called.
-
-        """
-        if not hasattr(self, 'ipList_index'):
-            self.ipList_index = 0
-        result = self.t.ipList[self.ipList_index:]
-        self.ipList_index = len(self.t.ipList) - 1
-        return result
 
 
