@@ -8,8 +8,10 @@ Copyright (C) 2014-2015 Tellectual LLC
 """
 
 import os.path, random
+from time import time
 
 import ipcalc
+from ipaddress import IPv4Address
 
 import testbase as tb
 
@@ -47,6 +49,46 @@ class TestIPMatcher(tb.TestCase):
         for thisIP, expectMatch in cases:
             self.assertEqual(self.m(thisIP), expectMatch, thisIP)
 
+    def test_performance_noCache(self):
+        def timeit(f, *args):
+            t0 = time()
+            f(*args)
+            return time() - t0
+
+        def runFromList(N, f, ipList):
+            count = 0
+            Nk = len(ipList)
+            while count < N:
+                ip = ipList[count % Nk]
+                f(ip)
+                count += 1
+        
+        # Build a matcher and plain old dict with the same shitload of
+        # fake IP addresses
+        ipm = sift.IPMatcher(noCache=True); ipd = {}
+        count = 0; N = 10000
+        maxInt = 2**32 - 1
+        tm = td = 0
+        while count < N:
+            ip = str(IPv4Address(random.randint(0, maxInt)))
+            tm += timeit(ipm.addIP, ip)
+            td += timeit(ipd.__setitem__, ip, False)
+            count += 1
+        print("\nIPM takes {:.1f}x as long as plain dict to initialize".format(
+            tm/td))
+        # Now add a few known IP addresses
+        for ip in self.ipList:
+            ipm.addIP(ip)
+            ipd[ip] = False
+        # Time to find hits
+        tm = timeit(runFromList, 100, ipm, self.ipList)
+        td = timeit(runFromList, 100, ipd.__contains__, self.ipList)
+        print("\nIPM takes {:.1f}x as long to find hits".format(
+            tm/td))
+        
+
+        
+            
 
 class TestNetMatcher(tb.TestCase):
     def setUp(self):

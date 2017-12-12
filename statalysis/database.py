@@ -180,7 +180,7 @@ class Transactor(AccessBroker, util.Base):
             yield self.table(
                 name,
                 SA.Column('id', SA.Integer, primary_key=True),
-                SA.Column('value', SA.String(255)),
+                SA.Column('value', SA.String(255, collation='utf8')),
                 unique_value=['value']
             )
         yield self.table(
