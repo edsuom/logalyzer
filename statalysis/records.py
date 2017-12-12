@@ -151,7 +151,7 @@ class RecordKeeper(Base):
         self.dt = DeferredTracker()
         # There will be no repeated checks of the same IP in my usage
         # of the IP matcher, so the cache would only slow things down
-        self.ipm = IPMatcher(noCache=True)
+        self.ipm = IPMatcher()
 
     def startup(self):
         """

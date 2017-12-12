@@ -29,17 +29,6 @@ class TestIPMatcher(tb.TestCase):
     def setUp(self):
         self.m = sift.IPMatcher(tb.RULES_IP)
 
-    def test_dqToHash(self):
-        for ipString in self.ipList:
-            x = ipString.split('.'); x.reverse(); x = '.'.join(x)
-            self.assertEqual(
-                self.m.dqToHash(ipString), long(ipcalc.IP(x)))
-        
-    def test_addedRules(self):
-        for ipString in self.ipList:
-            ipHash = self.m.dqToHash(ipString)
-            self.assertIn(ipHash, self.m.ipHashes)
-
     def test_someMatches(self):
         cases = (
             ("109.207.200.0",   False),
@@ -65,7 +54,7 @@ class TestIPMatcher(tb.TestCase):
         
         # Build a matcher and plain old dict with the same shitload of
         # fake IP addresses
-        ipm = sift.IPMatcher(noCache=True); ipd = {}
+        ipm = sift.IPMatcher(); ipd = {}
         count = 0; N = 10000
         maxInt = 2**32 - 1
         tm = td = 0

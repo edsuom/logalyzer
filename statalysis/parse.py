@@ -155,6 +155,8 @@ class LineParser(object):
 
         [vhost, Requestor IP address, datetime, url, http, referrer, UA]
 
+        Lowercase is forced for vhost, but nothing else.
+
         """
         dt = None
         match = self.reTwistdPrefix.match(line)

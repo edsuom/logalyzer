@@ -19,7 +19,7 @@ class TestRecordKeeper(TestCase):
     def setUp(self):
         verbose = self.isVerbose()
         self.rk = records.RecordKeeper(
-            "sqlite://", 1, verbose=verbose, info=verbose)
+            "sqlite://", 1, [], verbose=verbose, info=verbose)
         self.t = self.rk.t
         return self.rk.startup()
     

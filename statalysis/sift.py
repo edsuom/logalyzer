@@ -8,20 +8,56 @@ Copyright (C) 2014-2015 Tellectual LLC
 """
 
 import re, os.path, array
-from bisect import bisect
-
 
 import ipcalc
 
 import util
 
 
+class IPMatcher(object):
+    """
+    I efficiently match IP addresses. Simple and fast.
+
+    Construct me with a list of IP addresses in dotted-quad format,
+    and add any further ones with L{addIP}.
+
+    """
+    reDottedQuad = re.compile(r'[0-9]{,3}\.[0-9]{,3}\.[0-9]{,3}\.[0-9]{,3}')
+    
+    def __init__(self, rules=[]):
+        self.ipSet = set()
+        for rule in rules:
+            rule = rule.strip()
+            if rule:
+                self.addIP(rule)
+
+    def __len__(self):
+        return len(self.ipSet)
+        
+    def addIP(self, ip):
+        """
+        Call this with an IP address (string format) to add it to my list
+        if it's not already there.
+        """
+        if self.reDottedQuad.match(ip):
+            self.ipSet.add(ip)
+
+    def removeIP(self, ip):
+        """
+        Call this with an IP address (string format) to remove it from my
+        list if it's there.
+        """
+        self.ipSet.discard(ip)
+            
+    def __call__(self, ip):
+        return ip in self.ipSet
+        
+
 class MatcherBase(object):
     """
     Build your matcher on me
     """
-    def __init__(self, rules=[], noCache=False):
-        self.useCache = not noCache
+    def __init__(self, rules=[]):
         clean = []
         for rule in rules:
             rule = rule.strip()
@@ -47,121 +83,8 @@ class MatcherBase(object):
         rule.
         """
         raise NotImplementedError("Must define a startup method")
+
     
-
-class IPMatcher(MatcherBase):
-    """
-    I efficiently match IP addresses. Simple and fast.
-
-    Construct me with a list of IP addresses in dotted-quad format,
-    and add any further ones with L{addIP}.
-
-    """
-    def startup(self, rules):
-        self.N = 0
-
-        # Lookup table for hashed ip strings
-        self.ipHashes = array.array('L')
-        for ip in rules:
-            self.addIP(ip, ignoreCache=True)
-        if self.useCache:
-            # Cache for hits
-            self.cm.new(20)
-            # Cache for misses
-            self.cm.new(20)
-
-    def __len__(self):
-        return len(self.ipHashes)
-        
-    def dqToHash(self, ip):
-        """
-        Fast dotted-quad to guaranteed-unique long int hash, adapted from
-        ipcalc.IP. This is NOT the actual long int value of the ip,
-        because we don't bother reversing the order of the four dotted
-        elements.
-        """
-        return sum(
-            long(byte) << 8 * index
-            for index, byte in enumerate(ip.split('.')))
-            
-    def addIP(self, ip, ignoreCache=False):
-        """
-        Call this with an IP address (string format) to add it to my list
-        if it's not already there.
-        """
-        # Clear the misses cache of this IP
-        if self.useCache and not ignoreCache:
-            self.cm.clear(1, ip)
-        # Add the hash if it's not already in my list
-        ipHash = self.dqToHash(ip)
-        if not self.N:
-            # The first one is special
-            self.N = 1
-            self.ipHashes.append(ipHash)
-            return
-        k = bisect(self.ipHashes, ipHash)
-        # Ignore if already in my list
-        if k == 1 and self.ipHashes[0] == ipHash:
-            return
-        if k < self.N and self.ipHashes[k] == ipHash:
-            return
-        self.N += 1
-        # Insert new IP hash where it would have been
-        self.ipHashes.insert(k, ipHash)
-
-    def removeIP(self, ip):
-        """
-        Call this with an IP address (string format) to remove it from my
-        list if it's there.
-        """
-        # Clear the hits cache of this IP
-        if self.useCache:
-            self.cm.clear(0, ip)
-        ipHash = self.dqToHash(ip)
-        if self.hasHash(ipHash):
-            self.ipHashes.remove(ipHash)
-            self.N -= 1
-    
-    def hasHash(self, ipHash):
-        """
-        Binary search, adapted from
-        http://code.activestate.com/recipes/81188/
-        """
-        kMin = 0
-        kMax = self.N - 1
-        while True:
-            if kMax < kMin:
-                return False
-            k = (kMin  + kMax) // 2
-            x = self.ipHashes[k]
-            if x < ipHash:
-                kMin = k + 1
-            elif x > ipHash:
-                kMax = k - 1
-            else:
-                return True
-            
-    def __call__(self, ip):
-        # Likely to be several sequential hits from hits and
-        # misses alike
-        if self.useCache:
-            if self.cm.check(0, ip):
-                # Hit was cached
-                return True
-            if self.cm.check(1, ip):
-                # Miss was cached
-                return False
-        if self.hasHash(self.dqToHash(ip)):
-            # IP found
-            if self.useCache:
-                self.cm.set(0, ip)
-            return True
-        # No IP address match
-        if self.useCache:
-            self.cm.set(1, ip)
-        return False
-
-
 class NetMatcher(MatcherBase):
     """
     I efficiently match IP addresses to IP networks with rules

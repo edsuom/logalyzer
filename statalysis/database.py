@@ -176,11 +176,14 @@ class Transactor(AccessBroker, util.Base):
             SA.Column('id_ua', SA.Integer),
             index_dt=['dt'], index_ip=['ip']
         )
+        kw = {}
+        if str(self.q.engine.url).startswith('mysql'):
+            kw['collation'] = "latin1_general_cs"
         for name in self.indexedValues:
             yield self.table(
                 name,
                 SA.Column('id', SA.Integer, primary_key=True),
-                SA.Column('value', SA.String(255, collation='utf8')),
+                SA.Column('value', SA.String(255, **kw)),
                 unique_value=['value']
             )
         yield self.table(
@@ -224,7 +227,7 @@ class Transactor(AccessBroker, util.Base):
             # IP matcher, which we do
             yield load(
                 'ip', self.ipm.addIP,
-                ignoreCache=True, progressCall=progressCall, N=N_progress)
+                progressCall=progressCall, N=N_progress)
             defer.returnValue(len(self.ipm))
 
         col = self.entries.c
