@@ -80,7 +80,7 @@ File of blocked IP addresses to pre-load into the sifter. You can specify the sa
 File in which to save a list of blocked IP addresses, in ascending numerical order.
 
 --cores N
-The number of CPU cores (really, python processes) to run in parallel. Set to 0 and the queue will run in a threadpool instead.
+The number of CPU cores (really, python processes) to run in parallel. Set to 0 and the queue will run in a threadpool instead. Maxes out at 4 because the main process can't service more than that.
 
 -v, --verbose
 Run verbosely
@@ -106,6 +106,11 @@ from twisted.internet import reactor, defer
 from util import Base #, Args (TODO: Use Args class instead of ezopt)
 from writer import IPWriter
 import logread, gui
+
+
+# Maximum number of cores to be allocated to ProcessReader subordinate
+# processes. The main process can't effectively service more than that.
+MAX_CORES = 4
 
 
 class RuleReader(Base):
@@ -241,9 +246,10 @@ class Recorder(Base):
                         continue
                     preloaded.append(line)
         rules = self.loadRules()
+        cores = MAX_CORES if self.opt['cores'] is None else self.opt['cores']
         return logread.Reader(
             rules, dbURL,
-            cores=self.opt['cores'],
+            cores=min([MAX_CORES, cores]),
             exclude=self.csvTextToList(self.opt['e'], int),
             ignoreSecondary=self.opt['y'],
             blockedIPs=preloaded,

@@ -44,6 +44,8 @@ class ProcessReader(KWParse):
     Subordinate Python processes use their own instances of me to read
     logfiles.
     """
+    benignBotURLs = ("/robots.txt",)
+    
     reSecondary = re.compile(
         r'(\.(jpg|jpeg|png|gif|css|ico|woff|ttf|svg|eot\??))' +\
         r'|(robots\.txt|sitemap\.xml|googlecea.+\.html)$')
@@ -119,8 +121,10 @@ class ProcessReader(KWParse):
             # Bogus line
             return
         vhost, ip, dt, url, http, ref, ua = stuff
-        # First and fastest of all is checking for known bad guys. We
-        # check our dedicated blocked-IP matcher.
+        # First and fastest of all is checking for IP addresses
+        # already identified as being blocked. If this is a blocked IP
+        # address, there's no need to pay any further attention to
+        # anything from it
         if self.ipm(ip):
             return
         # Now (also very fast), check for specified IP addresses to
@@ -156,13 +160,18 @@ class ProcessReader(KWParse):
             self.ipm.addIP(ip)
             return ip, True
         record['vhost'] = vhost
+        # If the request got this far but asked for a URL indicating a benign bot,
+        # ignore but don't block
+        if url in self.benignBotURLs:
+            return ip, False
         # The last and by FAR the most time-consuming check is for
-        # excluded networks. Only done if all other checks have
-        # passed. If you use the blocked IP list, don't include
-        # anything here that would include an IP address you want to
-        # have accessing your server!
+        # excluded networks to ignore (but not block). Only done if
+        # all other checks have passed. Use your .net rules to avoid
+        # getting bogged down with logfile analysis of requests from
+        # places where you just KNOW it's not an actual person
+        # browsing your site.
         if self.m.netMatcher(ip):
-            return ip, True
+            return ip, False
         return dt, record
 
     def ignoreIPs(self, ipList):
@@ -212,7 +221,7 @@ class ProcessReader(KWParse):
                 if stuff:
                     yield stuff
 
-    
+
 class Reader(KWParse, Base):
     """
     I read and parse web server log files

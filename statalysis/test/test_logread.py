@@ -121,11 +121,11 @@ class TestProcessReader(TestCase):
     
     def test_call_oldFormat_bot(self):
         return self._checkParsing(
-            "access.log.1", 'botMatcher', accepted=64, blocked=2, ignored=0)
+            "access.log.1", 'botMatcher', accepted=63, blocked=2, ignored=1)
 
     def test_call_newFormat_bot(self):
         return self._checkParsing(
-            "access.log.2", 'botMatcher', accepted=104, blocked=3, ignored=0)
+            "access.log.2", 'botMatcher', accepted=91, blocked=3, ignored=13)
 
     def test_call_oldFormat_ua(self):
         return self._checkParsing(
@@ -133,7 +133,7 @@ class TestProcessReader(TestCase):
 
     def test_call_newFormat_ua(self):
         return self._checkParsing(
-            "access.log.2", 'uaMatcher', accepted=88, blocked=0, ignored=26)
+            "access.log.2", 'uaMatcher', accepted=80, blocked=0, ignored=34)
 
     
 

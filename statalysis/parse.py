@@ -92,8 +92,9 @@ class LineParser(object):
     them with exclude.
     """
     reTwistdPrefix = rc(
-        rdb("-", 4, 2, 2),              # 1111-22-33
-        rdb(":", 2, 2, 2) + r'\+\d+',   # 44:55:66+0000
+        rdb("-", 4, 2, 2) +\
+        "[\sT]" +\
+        rdb(":", 2, 2, 2) + r'\+\d+',   # # 1111-22-33 44:55:66+0000
         r'\[(.+?)\]',                   # 7+
         r'(.+)'                         # 8+ (= CLF portion)
         )

