@@ -20,39 +20,30 @@ import sift
 
 class RedirectChecker(object):
     """
-    I check for vhosts that are redirects from another one.
+    I check for requests that follow a redirect. Call me with the IP
+    address and HTTP code of each request in order.
     """
-    N_redirects = 50
-
     def __init__(self):
-        self.redirects = OrderedDict()
+        self.redirects = set()
+
+    def clear(self):
+        self.redirects.clear()
         
-    def __call__(self, vhost, ip, http):
+    def __call__(self, ip, http):
         """
         Checks if this vhost is the destination of a redirect from another
-        one, and replaces it with the old one if so.
+        one.
 
-        Returns a 2-tuple containing a Bool that indicates if this was
-        a redirect, and the vhost (the original if so).
+        Returns C{True} if the last request from this IP address
+        resulted in a redirect.
         """
-        wasRedirect = False
         if http in [301, 302]:
-            # This is a redirect, so save my vhost for the inevitable
-            # check from the same IP address
-            self.redirects[ip] = vhost
-        else:
-            oldVhost = self.redirects.pop(ip, None)
-            if oldVhost:
-                # There was a former vhost: This is a redirect.
-                wasRedirect = True
-                # While we set the substitute vhost, put a replacement
-                # entry back in the FIFO to ensure we can find it
-                # again if checked again soon
-                vhost = self.redirects[ip] = oldVhost
-        # Remove oldest entry until FIFO no longer too big
-        while len(self.redirects) > self.N_redirects:
-            self.redirects.popitem(last=False)
-        return wasRedirect, vhost
+            self.redirects.add(ip)
+            return False
+        if ip in self.redirects:
+            self.redirects.remove(ip)
+            return True
+        return False
 
 
 class MatcherManager(object):

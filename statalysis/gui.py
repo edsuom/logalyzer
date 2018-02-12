@@ -343,10 +343,14 @@ class GUI(object):
         Constructs my widgets and starts my event loop and main loop.
         """
         def possiblyQuit(key):
-            if key in ('q', 'Q') and reactor.running:
-                # I trust the stopper function to call my stop method
-                # at the appropriate time
-                reactor.callFromThread(reactor.stop)
+            if key in ('q', 'Q'):
+                if not hasattr(self, '_stopping'):
+                    self._stopping = None
+                    self.warning("Shutting down, please wait...")
+                    if reactor.running:
+                        # I trust the stopper function to call my stop
+                        # method at the appropriate time
+                        reactor.callFromThread(reactor.stop)
                 
         # The top-level widgets
         self.m = Messages()
@@ -392,7 +396,6 @@ class GUI(object):
         L{main.Recorder.shutdown} after all other shutdown steps are
         done, as part of the Twisted reactor shutdown.
         """
-        print "STOP"
         if self.running and not hasattr(self, '_shutdownFlag'):
             self._shutdownFlag = None
             self.running = False

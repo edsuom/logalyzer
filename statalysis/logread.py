@@ -154,7 +154,7 @@ class ProcessReader(KWParse):
         record = {
             'ip': ip, 'http': http,
             'url': url, 'ref': ref, 'ua': ua }
-        record['was_rd'], vhost = self.rc(vhost, ip, http)
+        record['was_rd'] = self.rc(ip, http)
         if self.m.vhostMatcher(ip, vhost):
             # Excluded vhost, consider this IP misbehaving also, and block
             self.ipm.addIP(ip)
@@ -196,6 +196,8 @@ class ProcessReader(KWParse):
         line. It can be prefixed with a comment symbol ("#" or ";" if
         you wish).
         """
+        # Redirect checking is only valid within an individual logfile
+        self.rc.clear()
         firstLine = True
         self.isRunning = True
         with self.file(filePath) as fh:
@@ -328,13 +330,13 @@ class Reader(KWParse, Base):
             if result:
                 dt, size, N = result
                 self.msgBody(
-                    "File last parsed with {:d} bytes, timestamp '{}'",
+                    "Last parsed with {:d} bytes, timestamp '{}'",
                     size, dt, ID=ID)
                 if [dt, size] == fileInfo:
                     self.fileStatus(
-                        fileName, "Already loaded, {:d} records", N)
+                        fileName, "Loaded, {:d} records", N)
                     return
-                self.fileStatus(fileName, "File was updated, reloading")
+                self.fileStatus(fileName, "Updated, reloading")
             else:
                 self.fileStatus(fileName, "New file")
             return load()
