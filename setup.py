@@ -54,78 +54,74 @@ kw = {'version':           "0.4",
       'packages':          [
           'logalyzer', 'logalyzer.test',
       ],
-      'package_data':      {
-          'mcmandelbrot': [
-              'server-install.sh', 'mcm.*', 'blank.jpg'
-          ],
-      },
+      'data_files':        [
+          ('/opt/logalyzer': ['rules/*']),
+      ],
       'entry_points':      {
           'console_scripts': [
               'la = logalyzer.main:run',
           ],
       },
-      'test_suite':        "asynqueue.test",
+      'test_suite':        "logalyzer.test",
 }
 
 kw['keywords'] = [
-    'twisted', 'asynchronous', 'async', 'threads',
-    'parallel', 'distributed',
-    'task', 'queue', 'priority', 'multicore', 'fractal',
+    'twisted', 'asynchronous', 'async', 'log', 'logfile',
+    'analysis', 'database', 'filtering', 'web', 'access log',
 ]
 
 
 kw['classifiers'] = [
     'Development Status :: 5 - Production/Stable',
-
-    'Intended Audience :: Developers',
-    'Intended Audience :: Science/Research',
+    'Framework :: Twisted',
+    
+    'Intended Audience :: Information Technology',
+    'Intended Audience :: System Administrators',
     
     'License :: OSI Approved :: Apache Software License',
+    
     'Operating System :: OS Independent',
     'Programming Language :: Python :: 2.7',
     'Programming Language :: Python :: 2 :: Only',
-    'Framework :: Twisted',
+    'Programming Language :: SQL',
 
-    'Topic :: System :: Clustering',
-    'Topic :: System :: Distributed Computing',
-    'Topic :: Software Development :: Object Brokering',
-    'Topic :: Software Development :: Libraries :: Python Modules',
+    'Topic :: Database',
+    'Topic :: Internet :: Log Analysis',
+    'Topic :: System :: Systems Administration',
 ]
 
 # You get 77 characters. Use them wisely.
 kw['description'] =\
-"Asynchronous task queueing with Twisted: threaded, multicore, and remote."
+"Web server HTTP access log parsing, filtering, and SQL database storage."
 
 kw['long_description'] = """
-Asynchronous task queueing based on the Twisted framework, with task
-prioritization and a powerful worker interface. Worker implementations
-are included for running tasks asynchronously in the main thread, in
-separate threads, in separate Python interpreters (multiprocessing),
-and even on separate devices using Twisted's Asynchronouse Message
-Protocol.
+Parses the bloated HTTP access logs spewed out by your web server to
+extract the info you want about hits to your webserver from
+(hopefully) real people instead of just the endless hackers and
+bots. Stores the info in a relational database where you can access it
+using all the power of SQL.
 
-Includes deferred iteration capability: Calling a task that returns an
-iterator can return a Deferator_ instead, which does the iteration in
-a Twisted-friendly fashion, even over a network connection. You can
-also supply an object conforming to Twisted's IConsumer interface and
-iterations will be fed to it as they become available.
+Uses the power of your multicore CPU with Twisted_, AsynQueue_, and
+sAsync_ to process log files concurrently and fast. Duplicate entries
+are ignored, so you don't need to fret about redundancies in your
+logfiles. (It happens.) The filtering goes forwards and backwards;
+once an entry has been determined to come from a bad actor, all log
+entries from that IP address are purged and ignored.
 
-Includes an example package mcMandelbrot_ that generates Mandelbrot
-set images, row by row, demonstrating the power of asynchronous
-multi-core processing. An instance of ProcessQueue_ dispatches the
-computations for each row of pixels to workers running on separate
-Python processes. The color-mapped RGB results are collected as they
-come back and intelligently buffered for iterating in a proper
-sequence to a third-party PNG library that wouldn't ordinarily play
-nice with Twisted.
+.. _Twisted: https://twistedmatrix.com/trac/
 
-Python 3 compatiblity is in the works, but not yet supported.
+.. _AsynQueue: http://edsuom.com/AsynQueue.html
 
-.. _mcMandelbrot: http://edsuom.com/mcMandelbrot.html
+.. _sAsync: http://edsuom.com/sAsync.html
 
-.. _ProcessQueue: http://edsuom.com/AsynQueue/asynqueue.process.ProcessQueue.html
+If you see bot garbage getting through and polluting your logs with
+some new attempt at an exploit, just add a rule for it to your rules
+lists, starting with what *logalyzer* comes prepackaged with. The next
+time you run it, those entries will get purged as well.
 
-.. _Deferator: http://edsuom.com/AsynQueue/asynqueue.iteration.Deferator.html
+Optionally produces a list of offender IP addresses that you can use
+to deny access to your web server entirely.
+
 """
 
 ### Finally, run the setup
