@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 #
 # logalyzer:
 # Parses your bloated HTTP access logs to extract the info you want
@@ -55,7 +56,8 @@ kw = {'version':           "0.4",
           'logalyzer', 'logalyzer.test',
       ],
       'data_files':        [
-          ('/opt/logalyzer': ['rules/*']),
+          ('/opt/logalyzer/rules', ['rules/*']),
+          ('/opt/logalyzer/sql', ['sql/*']),
       ],
       'entry_points':      {
           'console_scripts': [
@@ -72,7 +74,7 @@ kw['keywords'] = [
 
 
 kw['classifiers'] = [
-    'Development Status :: 5 - Production/Stable',
+    'Development Status :: 4 - Beta',
     'Framework :: Twisted',
     
     'Intended Audience :: Information Technology',
