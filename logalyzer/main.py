@@ -126,7 +126,7 @@ import os.path
 
 from twisted.internet import reactor, defer
 
-from util import Base #, Args (TODO: Use Args class instead of ezopt)
+from util import Base, Args
 from writer import IPWriter
 import logread, gui
 
@@ -206,9 +206,9 @@ class Recorder(Base):
         ('o', "vhost", "VhostMatcher"),
     )
     
-    def __init__(self, opt):
-        self.opt = opt
-        self.verbose = opt['v']
+    def __init__(self, args):
+        self.args = args
+        self.verbose = args.v
         self.triggerID = reactor.addSystemEventTrigger(
             'before', 'shutdown', self.shutdown)
 
@@ -245,7 +245,7 @@ class Recorder(Base):
         Loads rules per your command-line options. Returns a dict of
         sifters loaded with all the selected rules.
         """
-        rulesDir = self.opt['d']
+        rulesDir = self.args.d
         if rulesDir is None:
             rulesDir = os.path.join(self.myDir, 'rules')
         rules = {}
@@ -260,7 +260,7 @@ class Recorder(Base):
         I generate and return a log reader with all its rules loaded 
         """
         preloaded = []
-        filePath = self.opt['f']
+        filePath = self.args.f
         if filePath and os.path.exists(filePath):
             with open(filePath) as fh:
                 for line in fh:
@@ -273,18 +273,18 @@ class Recorder(Base):
         return logread.Reader(
             rules, dbURL,
             cores=min([MAX_CORES, cores]),
-            exclude=self.csvTextToList(self.opt['e'], int),
-            ignoreSecondary=self.opt['y'],
+            exclude=self.csvTextToList(self.args.e, int),
+            ignoreSecondary=self.args.y,
             blockedIPs=preloaded,
             verbose=self.verbose, info=self.opt['info'],
-            warnings=self.opt['w'], gui=self.gui, updateOnly=self.opt['t'])
+            warnings=self.args.w, gui=self.gui, updateOnly=self.args.t)
 
     def load(self):
         """
         This is where it all happens.
         """
         def done(rejectedIPs):
-            filePath = self.opt['s']
+            filePath = self.args.s
             if filePath:
                 w = IPWriter()
                 w.writeIPs(rejectedIPs, filePath)
@@ -300,7 +300,7 @@ class Recorder(Base):
     def run(self):
         self.parseArgs()
         # GUI, if -g option
-        if self.opt['g']:
+        if self.args.g:
             self.gui = gui.GUI(self.shutdown)
             self.gui.start(self.logFiles)
         # Reader
@@ -311,10 +311,38 @@ class Recorder(Base):
         reactor.run()
 
 
+args = Args("HTTP logfile analysis")
+args('-e', '--exclude', "",
+     "Exclude HTTP code(s) (comma separated list, no spaces)")
+args('-d', '--ruledir', "~/.logalyzer",
+     "Directory for files containing IP, user-agent, and url exclusion rules")
+args('-y', '--secondary',
+     "Ignore secondary files (css, webfonts, images)")
+args('-t', '--timestamp',
+     "Compare logfile timestamps to stored versions in the DB and only "+\
+     "parse if newer")
+args('-f', '--load', "",
+     "File of blocked IP addresses to pre-load into the sifter. You can "+\
+     "specify the same file as the file for blocked IP addresses to be "+\
+     "saved into (with -s). Preloading will speed things up considerably, "+\
+     "but don't use it in a run immediately after changing rules.")
+args('-s', '--save', "",
+     "File in which to save a list of blocked IP addresses, in ascending "+\
+     "numerical order.")
+args('-N', '--cores', 4,
+     "The number of CPU cores (really, python processes) to run in "+\
+     "parallel. Set to 0 and the queue will run in a threadpool instead. "+\
+     "Maxes out at 4 (the default) because the main process can't service "+\
+     "more than that.")
+args('-v', '--verbose', "Verbose mode")
+args('-i', '--info', "Info mode, even more verbose")
+args('-w', '--warn', "Extreme verbosity, with database transaction info")
+args('-g', '--gui',
+     "Run with console-mode GUI (implies -v, --info, and -w)")
+
+        
 def run():
-    import ezopt
-    opt = ezopt.Opt(__file__)
-    rk = Recorder(opt)
+    rk = Recorder(args)
     rk.run()
 
 
