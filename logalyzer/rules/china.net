@@ -1,0 +1,19 @@
+# This is Wizcrafts' Chinese-Asian blocklist, in iptables APF format, for use in Linux/Apache web server firewalls.
+## Compiled and published by Wizcrafts Computer Services - http://www.wizcrafts.net/
+### We have another version of this file in .htaccess format, at: http://www.wizcrafts.net/chinese-blocklist.html
+#### This time consuming work is supported by donations from people who use and benefit from this blocklist.
+##### Please make your donation here: http://www.wizcrafts.net/payments.html - Thanks in advance :-)
+###### This page is updated infrequently. Please reschedule your scripts to check just once a day to reduce the load on my hosting account.
+####### This blocklist was last updated on: May 28, 2018.
+
+# Cambodia (KH)
+114.134.184.0/21
+
+# Chinese (CN) IP addresses follow:
+1.24.0.0/13
+1.48.0.0/15
+1.50.0.0/16
+
+# OUT OF RESPECT FOR WIZCRAFT'S WORK, THE FULL BLOCKLIST IS NOT
+# REPRODUCED HERE. GET IT FROM
+# http://www.wizcrafts.net/chinese-iptables-blocklist.html

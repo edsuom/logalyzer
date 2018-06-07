@@ -415,18 +415,17 @@ class Args(object):
     add, with a short letter (just a single letter) preceded by a
     single hyphen ("-"), a long option preceded by a pair of hyphens
     ("--"), a default value if the option isn't just C{store_true},
-    and a text description of the option.
+    and a text description of the option. There will be a total of 3-4
+    arguments.
 
     You will access the option value using the short letter value,
     which gives you 26 possibilities for options (52 if you use both
     upper and lowercase). If you need more than that, you may be
     overcomplicating your command line.
 
-    You can also call the instance once to set a variable for any
-    positional arguments. The arguments for that call are a letter (no
-    preceding hyphen) for the name of the variable holding the
-    sequence of any positional arguments the user provides, a default
-    value if any, and a text description of the positional arguments.
+    Call the instance with just one argument, a text description, to
+    allow for positional arguments. The arguments will be accessed
+    from the instance as sequence items.
 
     The instance will look exactly like an L{argparse.ArgumentParser}
     object, all set up and ready to have its attributes accessed.
@@ -457,30 +456,26 @@ class Args(object):
                 action='store', type=type(default), help=helpText)
             return
         if len(args) == 3:
-            if args[0].startswith('-'):
-                shortArg, longArg, helpText = args
-                self.parser.add_argument(
-                    shortArg, longArg, dest=shortArg[1:],
-                    action='store_true', help=helpText)
-                return
-            dest, default, helpText = args
-            helpText = self.addDefault(helpText, default)
+            shortArg, longArg, helpText = args
             self.parser.add_argument(
-                dest, default=default, type=type(default),
-                help=helpText)
+                shortArg, longArg, dest=shortArg[1:],
+                action='store_true', help=helpText)
             return
-        if len(args) == 2:
-            dest, helpText = args
+        if len(args) == 1:
+            helpText = args[0]
             self.parser.add_argument(
-                dest, default=None, nargs='*', help=helpText)
+                '_args_', default=None, nargs='*', help=helpText)
             return
 
     def __iter__(self):
-        for name in dir(self.args):
-            if name.startswith('_'):
-                continue
-            yield name
-        
+        return getattr(self, '_args_', [])
+
+    def __len__(self):
+        return len(list(self))
+
+    def __getitem__(self, k):
+        return list(self)[k]
+    
     def __getattr__(self, name):
         if self.args is None:
             self.args = self.parser.parse_args()

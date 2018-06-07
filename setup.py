@@ -55,9 +55,8 @@ kw = {'version':           "0.4",
       'packages':          [
           'logalyzer', 'logalyzer.test',
       ],
-      'data_files':        [
-          ('/opt/logalyzer/rules', ['rules/*']),
-          ('/opt/logalyzer/sql', ['sql/*']),
+      'package_data':        [
+          ('logalyzer', ['rules/*']),
       ],
       'entry_points':      {
           'console_scripts': [

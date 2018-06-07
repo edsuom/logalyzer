@@ -26,35 +26,15 @@
 # governing permissions and limitations under the License.
 
 """
-NAME
-statalysis: Analyzes web server log files
+logalyzer:
+Parses your bloated HTTP access logs to extract the info you want
+about hits to your webserver from (hopefully) real people instead of
+just the endless hackers and bots. Stores the info in a relational
+database where you can access it using all the power of SQL.
 
-
-SYNOPSIS
-sa [-v, --verbose] [--cores N]
-   [-p] [-e, --exclude http1,http2,...]
-   [-d, --ruledir <directory of rule files>]
-     [-i, --ip  [xX]|rule1,rule2,...]
-     [-n, --net [xX]|rule1,rule2,...]
-     [-u, --ua  [xX]|rule1,rule2,...]
-     [-b, --bot [xX]|rule1,rule2,...]
-     [-r, --ref [xX]|rule1,rule2,...]
-   [-y, --secondary]
-   [-s, --save <file to save purged IPs>]
-dbURL [logfiles...]
-
-
-DESCRIPTION
-
-Using the database who RFC-1738 url is supplied as the first (and
-possibly only) argument, analyzes the log files listed in further
-arguments, or in the director(ies) listed, or in the current
-directory if there are no further arguments.
-
-Specify particular ip, net, ua, bot, or ref rules in the rules
-directory with a comma-separated list after the -i, -n, -u, -b, or -r
-option. Use x or X to skip all such rules. Omit the option to use all
-pertinent rules in the rules directory.
+Using the database whose RFC-1738 url is supplied as the first
+argument, analyzes the log files in the directory specified at the
+second argument.
 
 All records from IP addresses with bot behavior will be purged.
 
@@ -63,66 +43,9 @@ WARNING: If any of your bot-detecting rules that purge IP addresses
 '/robots.txt', don't use the saved list (--save) to block access to
 your web server!
 
-
-OPTIONS
-
--e, --exclude exclude
-Exclude HTTP code(s) (comma separated list, no spaces)
-
--d, --ruledir ruledir
-Directory for .net, .ua, and .url file(s) containing IP, user-agent, and url exclusion rules (default: ./rules)
-
--i, --ip rules
-Rules corresponding to .ip files in ruledir containing IP addresses aaa.bbb.ccc.ddd notation
-
--n, --net rules
-Rules corresponding to .net files in ruledir containing IP network exclusion rules in aaa.bbb.ccc.ddd/ee notation
-
--u, --ua rules
-Rules corresponding to .ua files containing regular expressions (case sensitive) that match User-Agent strings to exclude
-
--b, --bot rules
-Rules corresponding to .url files containing regular expressions (case sensitive) that match url strings indicating a malicious bot
-
--r, --referrer rules
-Rules corresponding to .ref files containing regular expressions (case sensitive) that match referrer strings indicating a malicious bot
-
--o, --vhost rules
-Rules corresponding to .vhost files containing regular expressions (case sensitive) that match virtual host requests indicating a malicious bot
-
--y, --secondary
-Ignore secondary files (css, webfonts, images)
-
--t, --timestamp
-Compare logfile timestamps to stored versions in the DB and only parse if newer
-
--f, --load file
-File of blocked IP addresses to pre-load into the sifter. You can specify the same file as the file for blocked IP addresses to be saved into (with -s). Preloading will speed things up considerably, but don't use it in a run immediately after changing rules.
-
--s, --save file
-File in which to save a list of blocked IP addresses, in ascending numerical order.
-
---cores N
-The number of CPU cores (really, python processes) to run in parallel. Set to 0 and the queue will run in a threadpool instead. Maxes out at 4 because the main process can't service more than that.
-
--v, --verbose
-Run verbosely
-
---info
-Run even more verbosely
-
--w, --warn
-Extreme verbosity, with database transaction info
-
--g, --gui
-Run with console-mode GUI (implies -v, --info, and -w)
-
-
-LICENSE
-Copyright (C) 2015 Tellectual LLC
 """
 
-import os.path
+import os, os.path, shutil, pkg_resources
 
 from twisted.internet import reactor, defer
 
@@ -140,10 +63,25 @@ class RuleReader(Base):
     """
     I read rule files
     """
-    def __init__(self, rulesDir='rules', gui=None, verbose=False):
-        self.myDir = rulesDir
+    def __init__(self, rulesDir, gui=None, verbose=False):
+        self.rulesDir = rulesDir
         self.gui = gui
         self.verbose = verbose
+        self.setup()
+
+    def setup(self):
+        """
+        Makes sure I have a proper rules directory.
+        """
+        r = pkg_resources.Requirement.parse('logalyzer')
+        stockRulesDir = pkg_resources.resource_filename(r, 'rules')
+        if not os.path.exists(self.rulesDir):
+            os.mkdir(self.rulesDir)
+        for fileName in os.listdir(stockRulesDir):
+            rulesPath = os.path.join(self.rulesDir, fileName)
+            if not os.path.exists(rulesPath):
+                stockPath = os.path.join(stockRulesDir, fileName)
+                shutil.copy(stockPath, rulesPath)
     
     def linerator(self, filePath):
         N = 0
@@ -165,26 +103,19 @@ class RuleReader(Base):
         """
         return list(self.linerator(filePath))
         
-    def rules(self, extension, text):
+    def rules(self, extension):
         """
-        Supply a file extension and a comma-separated list of rules as a
-        string, and I'll read the rules from the corresponding files
-        in my rules directory, returning a list of their lines.
-
-        If an empty string or None is supplied, all the corresponding
-        rule files in the rules directory will be read.
+        Supply a file extension and I'll read the rules from the
+        corresponding files in my rules directory, returning a list of
+        their lines.
         """
         def addExtension(x):
             return "{}.{}".format(x, extension)
 
         lines = []
-        if text in ['x', 'X']:
-            return lines
-        nameList = self.csvTextToList(text, addExtension)
-        if not nameList:
-            nameList = [
-                x for x in self.filesInDir()
-                if x.endswith(".{}".format(extension))]
+        nameList = [
+            x for x in self.filesInDir()
+            if x.endswith(".{}".format(extension))]
         for fileName in nameList:
             filePath = self.pathInDir(fileName)
             for line in self.linerator(filePath):
@@ -224,34 +155,28 @@ class Recorder(Base):
         return self.reader.shutdown()
         
     def parseArgs(self):
-        args = list(self.opt)
-        self.dbURL = args[0]
+        self.dbURL = self.args.pargs[0]
         # Logfiles specified by command-line args after the db
         # url. Can be logfiles or directories containing logfiles. If
         # none specified, the logfiles in my current directory will be
         # used.
         self.logFiles = []
         pattern = 'access.log'
-        for arg in args[1:]:
-            self.logFiles.extend(self.filesInDir(path=arg, pattern=pattern))
+        logdir = self.args[1] if len(self.args) > 1 else "."
+        self.logFiles.extend(self.filesInDir(path=logdir, pattern=pattern))
         if not self.logFiles:
-            self.logFiles = self.filesInDir(pattern=pattern)
-        if not self.logFiles:
-            raise RuntimeError(
-                "No logfiles specified or in current directory")
+            raise RuntimeError("No logfiles found in {}".format(logdir))
 
     def loadRules(self):
         """
         Loads rules per your command-line options. Returns a dict of
         sifters loaded with all the selected rules.
         """
-        rulesDir = self.args.d
-        if rulesDir is None:
-            rulesDir = os.path.join(self.myDir, 'rules')
         rules = {}
+        rulesDir = os.path.expanduser(self.args.d)
         rr = RuleReader(rulesDir, gui=self.gui, verbose=self.verbose)
         for optKey, extension, matcherName in self.ruleTable:
-            theseRules = rr.rules(extension, self.opt[optKey])
+            theseRules = rr.rules(extension)
             rules[matcherName] = theseRules
         return rules
         
@@ -269,14 +194,14 @@ class Recorder(Base):
                         continue
                     preloaded.append(line)
         rules = self.loadRules()
-        cores = MAX_CORES if self.opt['cores'] is None else self.opt['cores']
+        cores = MAX_CORES if self.args.N is None else self.args.N
         return logread.Reader(
             rules, dbURL,
             cores=min([MAX_CORES, cores]),
             exclude=self.csvTextToList(self.args.e, int),
             ignoreSecondary=self.args.y,
             blockedIPs=preloaded,
-            verbose=self.verbose, info=self.opt['info'],
+            verbose=self.verbose, info=self.args.i,
             warnings=self.args.w, gui=self.gui, updateOnly=self.args.t)
 
     def load(self):
@@ -304,7 +229,7 @@ class Recorder(Base):
             self.gui = gui.GUI(self.shutdown)
             self.gui.start(self.logFiles)
         # Reader
-        self.reader = self.readerFactory(self.opt[0])
+        self.reader = self.readerFactory(self.args[0])
         # Everything starts with my load method
         reactor.callWhenRunning(self.load)
         # GO!
@@ -339,8 +264,9 @@ args('-i', '--info', "Info mode, even more verbose")
 args('-w', '--warn', "Extreme verbosity, with database transaction info")
 args('-g', '--gui',
      "Run with console-mode GUI (implies -v, --info, and -w)")
+args("<Database URL (RFC-1738)> [<logfile dir>]")
 
-        
+
 def run():
     rk = Recorder(args)
     rk.run()
