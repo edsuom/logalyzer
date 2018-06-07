@@ -468,13 +468,14 @@ class Args(object):
             return
 
     def __iter__(self):
-        return getattr(self, '_args_', [])
+        for x in getattr(self, '_args_', []):
+            yield x
 
     def __len__(self):
-        return len(list(self))
+        return len(getattr(self, '_args_', []))
 
     def __getitem__(self, k):
-        return list(self)[k]
+        return getattr(self, '_args_', [])[k]
     
     def __getattr__(self, name):
         if self.args is None:

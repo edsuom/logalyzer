@@ -55,9 +55,9 @@ kw = {'version':           "0.4",
       'packages':          [
           'logalyzer', 'logalyzer.test',
       ],
-      'package_data':        [
-          ('logalyzer', ['rules/*']),
-      ],
+      'package_data':        {
+          'logalyzer': ['rules/*'],
+      },
       'entry_points':      {
           'console_scripts': [
               'la = logalyzer.main:run',

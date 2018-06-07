@@ -155,7 +155,7 @@ class Recorder(Base):
         return self.reader.shutdown()
         
     def parseArgs(self):
-        self.dbURL = self.args.pargs[0]
+        self.dbURL = self.args[0]
         # Logfiles specified by command-line args after the db
         # url. Can be logfiles or directories containing logfiles. If
         # none specified, the logfiles in my current directory will be
