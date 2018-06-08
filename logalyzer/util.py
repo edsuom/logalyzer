@@ -219,8 +219,8 @@ class Base(object):
 
     @myDir.setter
     def myDir(self, value):
-        if not os.path.isdir(value):
-            raise OSError("Directory '{}' not found".format(value))
+        if not os.path.exists(value):
+            os.mkdir(value)
         self._myDir = value
 
     @myDir.deleter

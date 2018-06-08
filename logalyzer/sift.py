@@ -86,7 +86,8 @@ class MatcherBase(object):
 
     def reFromRules(self, rules):
         if not rules:
-            print "WARNING: Empty rules for {}".format(self)
+            # Messes up GUI
+            #print "WARNING: Empty rules for {}".format(self)
             return
         reParts = []
         for rule in rules:

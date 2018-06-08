@@ -64,7 +64,7 @@ class RuleReader(Base):
     I read rule files
     """
     def __init__(self, rulesDir, gui=None, verbose=False):
-        self.rulesDir = rulesDir
+        self.myDir = rulesDir
         self.gui = gui
         self.verbose = verbose
         self.setup()
@@ -75,10 +75,8 @@ class RuleReader(Base):
         """
         r = pkg_resources.Requirement.parse('logalyzer')
         stockRulesDir = pkg_resources.resource_filename(r, 'rules')
-        if not os.path.exists(self.rulesDir):
-            os.mkdir(self.rulesDir)
         for fileName in os.listdir(stockRulesDir):
-            rulesPath = os.path.join(self.rulesDir, fileName)
+            rulesPath = os.path.join(self.myDir, fileName)
             if not os.path.exists(rulesPath):
                 stockPath = os.path.join(stockRulesDir, fileName)
                 shutil.copy(stockPath, rulesPath)
@@ -149,10 +147,13 @@ class Recorder(Base):
         down, and this is it. Let the reactor call it automatically
         when you do a reactor.stop().
         """
+        def done(null):
+            reactor.stop()
+        
         if hasattr(self, 'triggerID'):
             reactor.removeSystemEventTrigger(self.triggerID)
             del self.triggerID
-        return self.reader.shutdown()
+        return self.reader.shutdown().addCallback(done)
         
     def parseArgs(self):
         self.dbURL = self.args[0]
@@ -217,8 +218,7 @@ class Recorder(Base):
             if self.gui:
                 if self.reader.isRunning():
                     self.msgBody("Press 'q' to quit.")
-            elif reactor.running:
-                reactor.stop()
+            else: return self.shutdown()
         # Almost all of my time is spent in this next line
         return self.reader.run(self.logFiles).addCallbacks(done, self.oops)
     
@@ -264,7 +264,8 @@ args('-i', '--info', "Info mode, even more verbose")
 args('-w', '--warn', "Extreme verbosity, with database transaction info")
 args('-g', '--gui',
      "Run with console-mode GUI (implies -v, --info, and -w)")
-args("<Database URL (RFC-1738)> [<logfile dir>]")
+args("<DB URL (dialect+driver://username:password@host:port/database)> "+\
+     "[<logfile dir>]")
 
 
 def run():
