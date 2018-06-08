@@ -1,0 +1,6 @@
+include NOTICE
+include LICENSE.txt
+
+recursive-include rules *
+recursive-include sql-examples *
+

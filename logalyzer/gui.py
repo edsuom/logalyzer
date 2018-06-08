@@ -326,7 +326,7 @@ class GUI(object):
     """
     I am the main curses interface.
     """
-    title = "Statalysis"
+    title = "Logalyzer"
     
     palette = [
         # Name

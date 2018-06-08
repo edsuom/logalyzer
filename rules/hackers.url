@@ -41,3 +41,9 @@ DOCUMENT_ROOT
 ^http://w*\.ly\.com/
 /trackback/$
 ^/administrator/
+/[^/]+admin/
+/user/register/
+/ccvv
+/jmx-console
+/ads\.txt
+//httpheader

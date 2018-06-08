@@ -56,7 +56,7 @@ import logread, gui
 
 # Maximum number of cores to be allocated to ProcessReader subordinate
 # processes. The main process can't effectively service more than that.
-MAX_CORES = 4
+MAX_CORES = 3
 
 
 class RuleReader(Base):
@@ -254,10 +254,10 @@ args('-f', '--load', "",
 args('-s', '--save', "",
      "File in which to save a list of blocked IP addresses, in ascending "+\
      "numerical order.")
-args('-N', '--cores', 4,
+args('-N', '--cores', MAX_CORES,
      "The number of CPU cores (really, python processes) to run in "+\
      "parallel. Set to 0 and the queue will run in a threadpool instead. "+\
-     "Maxes out at 4 (the default) because the main process can't service "+\
+     "Maxes out at 3 (the default) because the main process can't service "+\
      "more than that.")
 args('-v', '--verbose', "Verbose mode")
 args('-i', '--info', "Info mode, even more verbose")
