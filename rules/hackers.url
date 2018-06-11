@@ -27,7 +27,7 @@ logitec\.se
 /backup
 /[a-z\.]+\.(zip|rar|gz)
 /cgi-sys
-/\?.+\=node
+/\?.+\=(node|user|pass)
 jquery
 blogger\.com
 /mb-rip

@@ -96,31 +96,31 @@ class ProcessReader(KWParse):
         Given one line of a logfile, returns one of the following
         three types of result:
 
-        * For a bogus or ignored logfile line where there's no IP
-          address parsed or other entries from an IP address that was
-          parsed aren't to be affected, C{None}.
-        
-        * For a rejected logfile line, a 2-tuple with (1) a string
-          containing the dotted-quad form of an IP address whose
-          behavior or source caused the line to be rejected from
-          inclusion in logfile analysis, followed by (2) C{False} if
-          we are only interested in ignoring its logfile entries, or
-          C{True} if the IP address's behavior was so egregious as to
-          be blocked from further web access as well as being ignored
-          from logfile analysis.
-
-        * For an accepted logfile line, a 2-tuple containing (1) a
-          datetime object and (2) a dict describing the record for the
-          logfile valid line. The dict contains the following
-          entries::
-
-            ip:     Requestor IP address
-            http:   HTTP code
-            vhost:  Virtual host requested
-            was_rd: C{True} if there was a redirect to this URL
-            url:    Requested url
-            ref:    Referrer
-            ua:     The requestor's User-Agent string.
+          - For a bogus or ignored logfile line where there's no IP
+            address parsed or other entries from an IP address that was
+            parsed aren't to be affected, C{None}.
+          
+          - For a rejected logfile line, a 2-tuple with (1) a string
+            containing the dotted-quad form of an IP address whose
+            behavior or source caused the line to be rejected from
+            inclusion in logfile analysis, followed by (2) C{False} if
+            we are only interested in ignoring its logfile entries, or
+            C{True} if the IP address's behavior was so egregious as to
+            be blocked from further web access as well as being ignored
+            from logfile analysis.
+          
+          - For an accepted logfile line, a 2-tuple containing (1) a
+            datetime object and (2) a dict describing the record for the
+            logfile valid line. The dict contains the following
+            entries::
+          
+              ip:     Requestor IP address
+              http:   HTTP code
+              vhost:  Virtual host requested
+              was_rd: C{True} if there was a redirect to this URL
+              url:    Requested url
+              ref:    Referrer
+              ua:     The requestor's User-Agent string.
 
         The dict entry 'was_rd' indictates if the vhost listed was the
         original vhost requested before a redirect. In that case the

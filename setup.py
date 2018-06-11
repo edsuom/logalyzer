@@ -3,9 +3,10 @@
 #
 # logalyzer:
 # Parses your bloated HTTP access logs to extract the info you want
-# about hits to your webserver from (hopefully) real people instead of
-# just the endless hackers and bots. Stores the info in a relational
-# database where you can access it using all the power of SQL.
+# about hits from (hopefully) real people instead of just the endless
+# stream of hackers and bots that passes for web traffic
+# nowadays. Stores the info in a relational database where you can
+# access it using all the power of SQL.
 #
 # Copyright (C) 2015, 2017, 2018 by Edwin A. Suominen,
 # http://edsuom.com/logalyzer
@@ -96,11 +97,11 @@ kw['description'] =\
 "Web server HTTP access log parsing, filtering, and SQL database storage."
 
 kw['long_description'] = """
-Parses the bloated HTTP access logs spewed out by your web server to
-extract the info you want about hits to your webserver from
-(hopefully) real people instead of just the endless hackers and
-bots. Stores the info in a relational database where you can access it
-using all the power of SQL.
+Parses your bloated HTTP access logs to extract the info you want
+about hits from (hopefully) real people instead of just the endless
+stream of hackers and bots that passes for web traffic
+nowadays. Stores the info in a relational database where you can
+access it using all the power of SQL.
 
 Uses the power of your multicore CPU with Twisted_, AsynQueue_, and
 sAsync_ to process log files concurrently and fast. Duplicate entries

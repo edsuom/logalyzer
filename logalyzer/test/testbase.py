@@ -450,10 +450,11 @@ class Runerator(object):
 
     def beforeFile(self, fileName):
         """
-        for result in r.beforeFile('foo.pdf'):
-            <do something before checking for and deleting produced>
-            <file 'filePath'>
-        <file is now deleted>
+        Here is the use case::
+          for result in r.beforeFile('foo.pdf'):
+              <do something before checking for and deleting produced>
+              <file 'filePath'>
+          <file is now deleted>
 
         """
         yield self.run(fileName)
@@ -464,9 +465,10 @@ class Runerator(object):
 
     def afterFile(self, fileName):
         """
-        for filePath in r.afterFile('foo.pdf'):
-            <do something with produced file 'filePath'>
-        <file is now deleted>
+        Here is the use case::
+          for filePath in r.afterFile('foo.pdf'):
+              <do something with produced file 'filePath'>
+          <file is now deleted>
 
         """
         self.run(fileName)
@@ -478,9 +480,10 @@ class Runerator(object):
 
     def producesFileAndResult(self, fileName):
         """
-        for filePath, result in r.producesFile('foo.pdf'):
-            <do something with produced file 'filePath'>
-        <file is now deleted>
+        Here is the use case::
+          for filePath, result in r.producesFile('foo.pdf'):
+              <do something with produced file 'filePath'>
+          <file is now deleted>
 
         """
         result = self.run(fileName)
