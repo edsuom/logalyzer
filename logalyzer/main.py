@@ -75,9 +75,8 @@ class RuleReader(Base):
         """
         Makes sure I have a proper rules directory.
         """
-        r = pkg_resources.Requirement.parse('logalyzer')
-        stockRulesDir = pkg_resources.resource_filename(r, 'rules')
-        for fileName in os.listdir(stockRulesDir):
+        stockRulesDir = pkg_resources.resource_filename('logalyzer', 'rules')
+        for fileName in pkg_resources.resource_listdir('logalyzer', 'rules'):
             rulesPath = os.path.join(self.myDir, fileName)
             if not os.path.exists(rulesPath):
                 stockPath = os.path.join(stockRulesDir, fileName)

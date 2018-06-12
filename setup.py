@@ -33,7 +33,10 @@ NAME = "logalyzer"
 from setuptools import setup
 
 ### Define requirements
-required = ['sAsync']
+required = ['sAsync', 'ipcalc', 'urwid']
+
+# Comment this out in the unlikely event you don't ever want to use MySQL
+required.append('MySQL-python')
 
 
 ### Define setup options
