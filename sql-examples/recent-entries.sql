@@ -1,5 +1,6 @@
-/* Run this once in a while to see what scumbags are trying to hit your system     */
-/* and getting past the hackers.url filter                                         */
+/* Run this once in a while to see what scumbags are trying to hit your system
+   and getting past the hackers.url filter.
+*/
 select
 e.dt DT,
 e.ip IP,
@@ -13,6 +14,6 @@ inner join vhost on e.id_vhost = vhost.id
 inner join url on e.id_url = url.id
 inner join ua on e.id_ua = ua.id
 inner join ref on e.id_ref = ref.id
-order by DT desc, e.id desc;
-
+order by DT desc, e.id desc
+limit 1000;
 

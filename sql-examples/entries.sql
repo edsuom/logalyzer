@@ -5,6 +5,7 @@ inner join url on e.id_url = url.id
 inner join ua on e.id_ua = ua.id
 inner join ref on e.id_ref = ref.id
 where e.http != 404 and url.value not regexp '\.(css|ico)$'
-order by DT desc, e.id desc;
+order by DT desc, e.id desc
+limit 1000;
 
 

@@ -4,6 +4,5 @@ INNER JOIN url ON e.id_url = url.id
 WHERE e.http != 404
  AND url.value REGEXP '/pics/.+\.(jpg|png)$'
 GROUP BY YR, MO, URL
-ORDER BY YR DESC, MO DESC, N DESC;
-
-
+ORDER BY YR DESC, MO DESC, N DESC
+LIMIT 1000;
