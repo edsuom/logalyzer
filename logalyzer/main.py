@@ -3,9 +3,10 @@
 #
 # logalyzer:
 # Parses your bloated HTTP access logs to extract the info you want
-# about hits to your webserver from (hopefully) real people instead of
-# just the endless hackers and bots. Stores the info in a relational
-# database where you can access it using all the power of SQL.
+# about hits from (hopefully) real people instead of just the endless
+# stream of hackers and bots that passes for web traffic
+# nowadays. Stores the info in a relational database where you can
+# access it using all the power of SQL.
 #
 # Copyright (C) 2015, 2017, 2018 by Edwin A. Suominen,
 # http://edsuom.com/logalyzer
@@ -26,15 +27,17 @@
 # governing permissions and limitations under the License.
 
 """
-logalyzer:
-Parses your bloated HTTP access logs to extract the info you want
-about hits to your webserver from (hopefully) real people instead of
-just the endless hackers and bots. Stores the info in a relational
-database where you can access it using all the power of SQL.
+The main module of B{logalyzer} with the I{la} entry point.
 
-Using the database whose RFC-1738 url is supplied as the first
-argument, analyzes the log files in the directory specified at the
-second argument.
+Parses your bloated HTTP access logs to extract the info you want
+about hits from (hopefully) real people instead of just the endless
+stream of hackers and bots that passes for web traffic
+nowadays. Stores the info in a relational database where you can
+access it using all the power of SQL.
+
+Using the database whose URL is supplied as the first argument,
+analyzes the log files in the directory, the current one or one
+specified as a second argument.
 
 All records from IP addresses with bot behavior will be purged.
 
@@ -42,7 +45,6 @@ WARNING: If any of your bot-detecting rules that purge IP addresses
 (bot, ref) match innocent search engines, e.g., with a url match to
 '/robots.txt', don't use the saved list (--save) to block access to
 your web server!
-
 """
 
 import os, os.path, shutil, pkg_resources

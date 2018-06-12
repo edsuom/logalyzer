@@ -25,6 +25,10 @@
 # express or implied. See the License for the specific language
 # governing permissions and limitations under the License.
 
+"""
+SQL database access using sAsync.
+"""
+
 from zope.interface import implements
 from twisted.internet import defer
 from twisted.internet.interfaces import IConsumer

@@ -3,9 +3,10 @@
 #
 # logalyzer:
 # Parses your bloated HTTP access logs to extract the info you want
-# about hits to your webserver from (hopefully) real people instead of
-# just the endless hackers and bots. Stores the info in a relational
-# database where you can access it using all the power of SQL.
+# about hits from (hopefully) real people instead of just the endless
+# stream of hackers and bots that passes for web traffic
+# nowadays. Stores the info in a relational database where you can
+# access it using all the power of SQL.
 #
 # Copyright (C) 2015, 2017, 2018 by Edwin A. Suominen,
 # http://edsuom.com/logalyzer
@@ -25,6 +26,10 @@
 # express or implied. See the License for the specific language
 # governing permissions and limitations under the License.
 
+"""
+Command-line sort-of GUI using ncurses.
+"""
+
 import sys, math
 
 from twisted.internet import reactor, defer
@@ -34,7 +39,6 @@ from asynqueue.info import Info
 
 import urwid as u
 from urwid.raw_display import Screen
-
 
 class MessageBox(u.ListBox):
     """
