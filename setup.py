@@ -68,6 +68,7 @@ kw = {'version':           "0.4",
           ],
       },
       'test_suite':        "logalyzer.test",
+      'zip_safe':True,
 }
 
 kw['keywords'] = [
