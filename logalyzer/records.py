@@ -36,7 +36,7 @@ from twisted.internet.interfaces import IConsumer
 
 from asynqueue.util import DeferredTracker
 
-from util import Base
+from util import oops, Base
 from sift import IPMatcher
 import database
 
@@ -134,7 +134,7 @@ class ProcessConsumer(Base):
             # Major memory leak was caused by the callback, in GUI
             # mode: It added a little over 5,000 bytes per record
             # parsed to the memory usage.
-            d = self.rk.addRecord(*data).addCallbacks(done, self.oops)
+            d = self.rk.addRecord(*data).addCallbacks(done, oops)
         self.dt.put(d)
 
     def stopProduction(self, ID=None):
@@ -195,10 +195,11 @@ class RecordKeeper(Base):
             self.t.preload,
             progressCall=progress, N_batch=100,
             N_progress=self.progressUpdateInterval).addCallbacks(
-                done, self.oops)
+                done, oops)
         
     def shutdown(self):
-        return self.dt.deferToAll().addCallbacks(lambda _: self.t.shutdown())
+        return self.dt.deferToAll().addCallbacks(
+            lambda _: self.t.shutdown(), oops)
 
     def getNewBlockedIPs(self):
         """
@@ -257,7 +258,7 @@ class RecordKeeper(Base):
         # DB accordingly
         self.rejectedIPs[ip] = block
         d = self.t.purgeIP(ip, niceness=15)
-        d.addCallbacks(donePurging, self.oops)
+        d.addCallbacks(donePurging, oops)
         self.dt.put(d)
         return d
 
@@ -276,7 +277,7 @@ class RecordKeeper(Base):
         if record['ip'] in self.rejectedIPs:
             return defer.succeed(False)
         d = self.t.setRecord(dt, record)
-        d.addErrback(self.oops)
+        d.addErrback(oops)
         self.dt.put(d)
         return d
 

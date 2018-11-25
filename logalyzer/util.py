@@ -34,8 +34,34 @@ import re, os, os.path
 from collections import deque
 from contextlib import contextmanager
 
+from twisted.python import failure
 from twisted.internet import reactor, defer
 
+
+def sub(proto, *args):
+    """
+    This really should be a built-in function.
+    """
+    try:
+        text = proto.format(*args)
+    except:
+        text = "--"
+        #print sub("WARNING: Couldn't sub {} with {}", proto, args)
+    return text
+
+def oops(failureObj, debug=False):
+    def text():
+        if isinstance(failureObj, failure.Failure):
+            info = failureObj.getTraceback()
+        else: info = str(failureObj)
+        return sub("Failure:\n{}\n{}", '-'*40, info)
+    print(text())
+    if debug:
+        import pdb, traceback, sys
+        type, value, tb = sys.exc_info()
+        pdb.post_mortem(tb)
+        from twisted.internet import reactor
+        reactor.stop()
 
 def rdb(sep, *args):
     """
@@ -313,14 +339,6 @@ class Base(object):
         if self.gui:
             self.gui.fileStatus(fileName)
 
-    def oops(self, failure, *args):
-        text = "In {},".format(repr(self))
-        if args:
-            textProto = "{} {},".format(text, args[0])
-            text = textProto.format(*args[1:])
-        text += "\n {}".format(failure.getTraceback())
-        self.msgError(text)
-    
     def csvTextToList(self, text, converter):
         if text:
             return [converter(x.strip()) for x in text.split(',')]

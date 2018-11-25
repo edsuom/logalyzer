@@ -42,7 +42,7 @@ from twisted.internet.interfaces import IConsumer
 import asynqueue
 
 import sift, parse
-from util import Base
+from util import oops, Base
 from records import RecordKeeper
 
 
@@ -302,7 +302,9 @@ class Reader(KWParse, Base):
         
     def getQueue(self, thread=False):
         if thread or (self.N_processes == 0):
-            q = asynqueue.ThreadQueue()
+            from asynqueue.null import NullQueue
+            q = NullQueue()
+            #q = asynqueue.ThreadQueue()
         else:
             q = asynqueue.ProcessQueue(self.N_processes)
         return q
@@ -388,9 +390,8 @@ class Reader(KWParse, Base):
             # processes to have it feed the consumer with
             # misbehaving IP addresses and filtered records
             return self.pq.call(
-                self.pr,
-                filePath,
-                consumer=consumer).addCallback(done, consumer)
+                self.pr, filePath, consumer=consumer).addCallback(
+                    done, consumer).addErrback(oops)
 
         filePath = self.pathInDir(fileName)
         ID = self.msgHeading("Logfile {}...", fileName)
@@ -402,7 +403,7 @@ class Reader(KWParse, Base):
                 "File size {:d} bytes, timestamp '{}'",
                 fileInfo[1], fileInfo[0], ID=ID)
             return self.rk.fileInfo(
-                fileName).addCallbacks(gotInfo, self.oops)
+                fileName).addCallbacks(gotInfo, oops)
         return load()
 
     @defer.inlineCallbacks
@@ -438,6 +439,7 @@ class Reader(KWParse, Base):
             # results.
             d = self._dispatch(fileName)
             d.addCallback(lambda _: ds.release())
+            d.addErrback(oops)
             dList.append(d)
         self.msgBody(
             "Done dispatching, awaiting {:d} last results",

@@ -51,9 +51,19 @@ import os, os.path, shutil, pkg_resources
 
 from twisted.internet import reactor, defer
 
-from util import Base, Args
+from util import oops, Base, Args
 from writer import IPWriter
 import logread, gui
+
+
+# For providing some limited info about unhandled Deferred failures
+from twisted.logger import globalLogPublisher
+from twisted.logger._levels import LogLevel
+def analyze(event):
+    if event.get("log_level") == LogLevel.critical:
+        print("\nERROR: {}\n".format(event))
+        #reactor.stop()
+globalLogPublisher.addObserver(analyze)
 
 
 # Maximum number of cores to be allocated to ProcessReader subordinate
@@ -154,7 +164,7 @@ class Recorder(Base):
         if hasattr(self, 'triggerID'):
             reactor.removeSystemEventTrigger(self.triggerID)
             del self.triggerID
-        return self.reader.shutdown().addCallback(done)
+        return self.reader.shutdown().addCallbacks(done, oops)
         
     def parseArgs(self):
         self.dbURL = self.args[0]
@@ -221,7 +231,7 @@ class Recorder(Base):
                     self.msgBody("Press 'q' to quit.")
             else: return self.shutdown()
         # Almost all of my time is spent in this next line
-        return self.reader.run(self.logFiles).addCallbacks(done, self.oops)
+        return self.reader.run(self.logFiles).addCallbacks(done, oops)
     
     def run(self):
         self.parseArgs()
