@@ -27,7 +27,7 @@
 # governing permissions and limitations under the License.
 
 """
-Command-line sort-of GUI using ncurses.
+Command-line text GUI using ncurses.
 """
 
 import sys, math
@@ -46,6 +46,7 @@ class MessageBox(u.ListBox):
     for lines you can add under the heading.
     """
     def __init__(self, text):
+        """Constructor"""
         self.hText = text
         self.height = 1
         body = u.SimpleListWalker([self.headingText(True)])
@@ -98,6 +99,7 @@ class Messages(u.ListBox):
     orphanHeading = ""
     
     def __init__(self):
+        """Constructor"""
         self.boxes = []
         body = u.SimpleFocusListWalker([])
         super(Messages, self).__init__(body)
@@ -173,6 +175,7 @@ class ProgressText(u.Text):
     progressChars = "|/=\\"
 
     def __init__(self):
+        """Constructor"""
         self.k = 0
         self.N = len(self.progressChars)
         super(ProgressText, self).__init__(self.pc())
@@ -198,6 +201,7 @@ class FileRow(u.ListBox):
     minRightColWidth = 25
 
     def __init__(self, fileName, leftColWidth, totalWidth):
+        """Constructor"""
         self.p = ProgressText()
         self.leftColWidth = leftColWidth
         self.statusText = ""
@@ -243,6 +247,7 @@ class Files(u.GridFlow):
     gutterWidth = 2
     
     def __init__(self, fileNames, width):
+        """Constructor"""
         self.fileNames = fileNames
         self.leftColWidth = max([len(x) for x in fileNames])
         cellWidth, nCols = self._cellWidth(width)
@@ -304,6 +309,7 @@ class StdSubstitute(object):
     Twisted log observer.
     """
     def __init__(self, name, gui):
+        """Constructor"""
         self.name = name
         self.gui = gui
     
@@ -352,6 +358,7 @@ class GUI(object):
     ]
     
     def __init__(self, stopperFunction):
+        """Constructor"""
         self.running = False
         self.stopperFunction = stopperFunction
         self.id_counter = 0
